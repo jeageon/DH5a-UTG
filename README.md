@@ -142,6 +142,8 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\build-windows-exe.p
 
 이 저장소는 Windows 빌드 GitHub Actions를 제공합니다.  
 태그(`v*`)를 푸시하면 자동으로 `win` 환경에서 exe를 빌드해 `Artifacts`에 업로드합니다.
+(참고: GitHub의 `Create a new release` 버튼만으로 만든 기본 릴리스는 소스 코드 zip/tar.gz만 들어가며,
+`exe` 파일은 자동으로 안 들어갈 수 있습니다.)
 
 ```bash
 git tag v1.0.0
@@ -149,7 +151,7 @@ git push origin v1.0.0
 ```
 
 또는 GitHub Actions 화면에서 `Build and Release Windows EXE`를 수동 실행하고
-`create_release`를 `true`로 지정하면 `Release`에 실행 파일을 등록합니다.
+`create_release`를 `true`로 지정하면 `Release`에 실행 파일이 등록됩니다.
 
 - `DH5a-UTG-WebUI.exe`
 - `DH5a-UTG-CLI.exe`

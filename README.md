@@ -31,13 +31,36 @@ python3 -m pip install -r requirements.txt
 streamlit run src/webui.py
 ```
 
+### Windows에서 바로 실행(클릭형)
+
+Windows 사용자라면 다음 배치 파일을 더블클릭해서 바로 실행할 수 있습니다.
+
+- `run-UTG-CLI.bat` : 기존 `utg.py` 기반 CLI 실행
+- `run-UTG-WebUI.bat` : WebUI 실행(UTG 모드)
+- `run-DH5aUTG-CLI.bat` : `src/main.py` 기반 CLI 실행
+- `run-DH5aUTG-WebUI.bat` : `src/webui.py` 기반 WebUI 실행
+
+바탕화면 바로가기도 PowerShell로 한 번에 만들 수 있습니다.
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+powershell -ExecutionPolicy Bypass -File .\create-windows-shortcuts.ps1
+```
+
+바로가기는 기본적으로 바탕화면에 다음을 생성합니다.
+
+- `UTG-CLI`
+- `UTG-WebUI`
+- `DH5aUTG-CLI`
+- `DH5aUTG-WebUI`
+
 - 기본값은 DH5a(E. coli K-12 계열, taxid 511145 / CP076470) 기반입니다.
 - 입력창에 유전자명 또는 UniProt ID를 입력하면 간섭 feature 분석 결과를 즉시 확인할 수 있습니다.
 
 기본값:
 - `--flank`: 유전자 좌우 확장 bp(기본 10000)
 - `--taxid`: `511145` (E. coli DH5α)
-- `--ncbi-accession`: `CP076470`
+- `--ncbi-accession`: `CP076470` (원하면 `--ncbi-accession NC_123456` 등으로 엑세션을 바꿔 다른 염기서열 기준으로 즉시 전환)
 - `--query-type`: `auto|gene_name|uniprot_id`
 - `--flank-mode`: `genomic` 또는 `strand_relative`
 - `--features`: `annotation,low_complexity,palindrome,inverted_repeat,tandem_repeat,repeat,simple,variation,structural_variation,extreme_gc,homopolymer,ambiguous`
@@ -53,6 +76,16 @@ streamlit run src/webui.py
 `{Query}.{assembly}.{chr}_{extStart}_{extEnd}.negfeatures.gb`
 
 동일 basename의 `...metadata.json`도 생성됩니다.
+
+### 엑세션 전환 예시
+
+```bash
+python -m src.main lacZ --query-type gene_name --ncbi-accession CP076470 --taxid 511145
+python -m src.main lacZ --query-type gene_name --ncbi-accession NC_000913.3 --taxid 511145
+```
+
+WebUI에서는 `NCBI nuccore accession` 입력창에 원하는 GenBank accession을 입력한 뒤 실행하면,
+해당 염색체/Plasmid 기준으로 분석 대상 유전체가 자동 전환됩니다.
 
 실행 중 유전자 단위 간섭(예: 기존 주석/기능 요소)까지 포함하려면 `annotation`을 기본값에 추가해 두었으며,
 필요 시 `--features annotation,repeat,...` 형태로 원하는 항목만 지정할 수 있습니다.

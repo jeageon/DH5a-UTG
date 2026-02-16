@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import StringIO
 import re
 from typing import Any, Optional
+
+from Bio import SeqIO
 
 from ..config import (
     DH5A_ACCESSION,
     DH5A_TAXID,
     ENSEMBL_LOOKUP,
     EBI_COORDINATES_URL,
+    NCBI_EFETCH,
     NCBI_ESEARCH,
     NCBI_ESUMMARY,
     UNIPROT_ENTRY_URL,
@@ -42,6 +46,12 @@ def _normalize_ensembl_gene_id(raw: Any) -> Optional[str]:
     return cleaned if _ENSEMBL_GENE_ID_RE.match(cleaned) else None
 
 
+def _normalize_accession(raw: Optional[str]) -> str:
+    if not raw:
+        return ""
+    return str(raw).strip().split(".", 1)[0].upper()
+
+
 def _extract_gene_from_ref_value(ref: Any) -> Optional[str]:
     if not isinstance(ref, dict):
         return None
@@ -59,6 +69,26 @@ def _extract_gene_from_ref_value(ref: Any) -> Optional[str]:
             normalized = _normalize_ensembl_gene_id(prop.get("value"))
             if normalized:
                 return normalized
+    return None
+
+
+def _extract_gene_from_note(note: Any) -> Optional[str]:
+    if note is None:
+        return None
+    text = str(note)
+    matches = re.findall(
+        r"\b(gene|locus_tag|old_locus_tag|gene_name)\s*[:=]\s*([A-Za-z0-9_\-\.]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not matches:
+        return None
+    for key, value in matches:
+        if key.lower() == "gene":
+            return value
+    for key, value in matches:
+        if key.lower() in {"gene_name", "locus_tag", "old_locus_tag"}:
+            return value
     return None
 
 
@@ -129,6 +159,11 @@ class CoordinateResolver:
                     taxid_filter=taxid_filter,
                     warnings=warnings,
                     query_type="uniprot_id",
+                )
+            if _normalize_accession(ncbi_accession):
+                detail = "; ".join(warnings) if warnings else "no valid NCBI mapping found"
+                raise NoMappingError(
+                    f"No NCBI mapping found for '{query}' on preferred accession {_normalize_accession(ncbi_accession)}: {detail}"
                 )
 
         ensembl_gene_id, fallback_warnings = self._resolve_ensembl_gene(query)
@@ -490,12 +525,36 @@ class CoordinateResolver:
         except ToolError:
             return None, ["NCBI gene summary lookup failed"]
 
-        chosen = self._choose_best_ncbi_gene_summary(summaries, [query], [ncbi_accession])
+        chosen = self._choose_best_ncbi_gene_summary(
+            summaries=summaries,
+            aliases=[query],
+            accessions=[ncbi_accession],
+            prefer_accession_match=bool(ncbi_accession),
+        )
         if not chosen:
+            direct = self._resolve_ncbi_gene_from_accession_features(
+                aliases=[query],
+                accessions=[ncbi_accession],
+                species_name="Escherichia coli",
+            )
+            if direct:
+                return direct, [*warnings, "NCBI fallback: resolved via NCBI nuccore feature scan"]
             return None, ["NCBI gene summaries had no usable coordinates"]
 
-        ncbi_coordinates = self._ncbi_summary_to_coordinates(chosen, [query], self._coerce_str(chosen.get("organism", {}).get("commonname")))
+        ncbi_coordinates = self._ncbi_summary_to_coordinates(
+            chosen,
+            [query],
+            self._coerce_str(chosen.get("organism", {}).get("commonname")),
+            accessions=[ncbi_accession],
+        )
         if not ncbi_coordinates:
+            direct = self._resolve_ncbi_gene_from_accession_features(
+                aliases=[query],
+                accessions=[ncbi_accession],
+                species_name="Escherichia coli",
+            )
+            if direct:
+                return direct, [*warnings, "NCBI fallback: resolved via NCBI nuccore feature scan"]
             return None, ["NCBI summary lacked usable genomic coordinates"]
         ncbi_coordinates["query_name"] = query
         return ncbi_coordinates, [*warnings, "NCBI fallback: resolved via gene name search"]
@@ -521,9 +580,10 @@ class CoordinateResolver:
         if not gene_aliases:
             return None, ["no gene alias found for NCBI fallback"]
 
+        primary_ncbi_accessions = [self._coerce_str(ncbi_accession)] if self._coerce_str(ncbi_accession) else []
         ncbi_accessions = self._collect_ncbi_nucleotide_accessions(entry)
-        if ncbi_accessions or ncbi_accession:
-            combined_accessions = list(dict.fromkeys([*ncbi_accessions, self._coerce_str(ncbi_accession)]))
+        if ncbi_accessions or primary_ncbi_accessions:
+            combined_accessions = list(dict.fromkeys([*ncbi_accessions, *primary_ncbi_accessions]))
             if combined_accessions:
                 warnings.append(
                     "NCBI fallback: collected RefSeq/EMBL accession hints: "
@@ -531,18 +591,179 @@ class CoordinateResolver:
                 )
             ncbi_accessions = combined_accessions
 
+        matching_accessions = primary_ncbi_accessions or ncbi_accessions
+
         summaries = self._collect_ncbi_gene_summaries(gene_aliases, taxid, organism_name)
         if not summaries:
             return None, ["NCBI fallback: no NCBI gene record found for candidate identifiers"]
 
-        chosen = self._choose_best_ncbi_gene_summary(summaries, gene_aliases, ncbi_accessions)
+        chosen = self._choose_best_ncbi_gene_summary(
+            summaries=summaries,
+            aliases=gene_aliases,
+            accessions=matching_accessions,
+            prefer_accession_match=bool(matching_accessions),
+        )
         if not chosen:
+            direct = self._resolve_ncbi_gene_from_accession_features(
+                aliases=gene_aliases,
+                accessions=matching_accessions,
+                species_name=organism_name,
+            )
+            if direct:
+                return direct, warnings + ["NCBI fallback: resolved via NCBI nuccore feature scan"]
             return None, ["NCBI fallback: gene records lacked usable genomic location"]
 
-        ncbi_coordinates = self._ncbi_summary_to_coordinates(chosen, gene_aliases, organism_name)
+        ncbi_coordinates = self._ncbi_summary_to_coordinates(
+            chosen,
+            gene_aliases,
+            organism_name,
+            accessions=matching_accessions,
+        )
         if not ncbi_coordinates:
+            direct = self._resolve_ncbi_gene_from_accession_features(
+                aliases=gene_aliases,
+                accessions=matching_accessions,
+                species_name=organism_name,
+            )
+            if direct:
+                return direct, warnings + ["NCBI fallback: resolved via NCBI nuccore feature scan"]
             return None, ["NCBI fallback: failed to extract genomic coordinates from chosen NCBI summary"]
         return ncbi_coordinates, warnings + ["NCBI fallback: resolved via NCBI gene summary"]
+
+    def _resolve_ncbi_gene_from_accession_features(
+        self,
+        aliases: list[str],
+        accessions: list[str],
+        species_name: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        preferred_aliases: list[str] = []
+        alias_name_map: dict[str, str] = {}
+        for alias in aliases:
+            value = self._coerce_str(alias)
+            normalized = value.lower()
+            if value and normalized not in alias_name_map:
+                alias_name_map[normalized] = value
+            if value and normalized not in preferred_aliases:
+                preferred_aliases.append(normalized)
+        if not preferred_aliases:
+            return None
+
+        preferred_accessions = [self._coerce_str(acc) for acc in accessions if self._coerce_str(acc)]
+        if not preferred_accessions:
+            return None
+
+        feature_priority = {"gene": 0, "cds": 1, "mrna": 2, "rrna": 3, "trna": 3}
+        for accession in preferred_accessions:
+            record = self._fetch_ncbi_record_by_accession(accession)
+            if record is None:
+                continue
+
+            selected: Optional[tuple[int, int, int, int, str, int]] = None
+            genome_len = len(record.seq) if getattr(record, "seq", None) is not None else None
+            for item in record.features:
+                ftype = str(item.type).lower() if item.type else "misc_feature"
+                if ftype == "source":
+                    continue
+                feature_aliases = self._collect_feature_aliases(item)
+                matched_alias: Optional[str] = None
+                for wanted in preferred_aliases:
+                    if wanted in feature_aliases:
+                        matched_alias = wanted
+                        break
+                if matched_alias is None:
+                    continue
+                try:
+                    feature_start = int(item.location.start)
+                    feature_end = int(item.location.end)
+                except Exception:
+                    continue
+                if feature_end <= feature_start:
+                    continue
+
+                start_1based = feature_start + 1
+                end_1based = feature_end
+                strand = item.location.strand
+                if strand not in (-1, 1):
+                    strand = 1
+                length = end_1based - start_1based + 1
+                priority = feature_priority.get(ftype, 5)
+                score = (priority, -length)
+                if selected is None or score < selected[:2]:
+                    selected = (score[0], score[1], start_1based, end_1based, matched_alias, strand)
+
+            if selected is not None:
+                _, _, start_1based, end_1based, matched_alias, strand = selected
+                accession_norm = _normalize_accession(accession)
+                display_alias = alias_name_map.get(matched_alias or "", matched_alias or "unknown")
+                return {
+                    "query_name": display_alias,
+                    "ensembl_gene_id": display_alias,
+                    "ncbi_accession": accession_norm or self._coerce_str(accession),
+                    "species": species_name or "Escherichia coli DH5alpha",
+                    "assembly_name": f"NCBI {species_name or 'Escherichia coli DH5alpha'}",
+                    "seq_region_name": accession_norm or self._coerce_str(accession),
+                    "gene_start_1based": start_1based,
+                    "gene_end_1based": end_1based,
+                    "strand": int(strand) if strand in (-1, 1) else 1,
+                    "display_name": display_alias,
+                    "taxid": DH5A_TAXID,
+                    "ncbi_genome_length": genome_len,
+                }
+        return None
+
+    def _collect_feature_aliases(self, feature: Any) -> set[str]:
+        aliases: set[str] = set()
+        qualifiers = getattr(feature, "qualifiers", {}) or {}
+        if not isinstance(qualifiers, dict):
+            return aliases
+
+        for key in (
+            "gene",
+            "gene_synonym",
+            "locus_tag",
+            "old_locus_tag",
+            "protein_id",
+            "standard_name",
+        ):
+            raw = qualifiers.get(key)
+            if raw is None:
+                continue
+            values = raw if isinstance(raw, list) else [raw]
+            for value in values:
+                value_text = self._coerce_str(value)
+                if value_text:
+                    aliases.add(value_text.lower())
+
+        note = qualifiers.get("note")
+        if note is not None:
+            values = note if isinstance(note, list) else [note]
+            for value in values:
+                extracted = _extract_gene_from_note(value)
+                if extracted:
+                    aliases.add(extracted.lower())
+
+        return aliases
+
+    def _fetch_ncbi_record_by_accession(self, accession: str) -> Any:
+        response = self.api.get(
+            NCBI_EFETCH,
+            headers={"Accept": "text/plain"},
+            params={
+                "db": "nuccore",
+                "id": self._coerce_str(accession),
+                "rettype": "gbwithparts",
+                "retmode": "text",
+            },
+        )
+        if not response.text:
+            return None
+        try:
+            records = list(SeqIO.parse(StringIO(response.text), "genbank"))
+        except Exception:
+            return None
+        if not records:
+            return None
+        return records[0]
 
     def _fetch_uniprot_entry(self, query: str) -> Optional[dict[str, Any]]:
         response = self.api.get(
@@ -711,16 +932,25 @@ class CoordinateResolver:
         summaries: list[dict[str, Any]],
         aliases: list[str],
         accessions: list[str],
+        prefer_accession_match: bool = False,
     ) -> Optional[dict[str, Any]]:
-        target_accessions = {self._coerce_str(acc).upper() for acc in accessions if self._coerce_str(acc)}
+        target_accessions = {_normalize_accession(acc) for acc in accessions if self._coerce_str(acc)}
         alias_set = {self._coerce_str(alias).lower() for alias in aliases if self._coerce_str(alias)}
+        normalized_accessions = {acc for acc in target_accessions if acc}
 
         for summary in summaries:
-            genomic_info = self._coerce_ncbi_gene_genomic_info(summary)
+            genomic_info = self._coerce_ncbi_gene_genomic_info(
+                summary,
+                preferred_accessions=normalized_accessions,
+                require_preferred=bool(prefer_accession_match and normalized_accessions),
+            )
             if not genomic_info:
                 continue
-            if self._coerce_str(genomic_info.get("chraccver")).upper() in target_accessions:
+            if not normalized_accessions or _normalize_accession(genomic_info.get("chraccver")) in normalized_accessions:
                 return summary
+
+        if prefer_accession_match and normalized_accessions:
+            return None
 
         for summary in summaries:
             genomic_info = self._coerce_ncbi_gene_genomic_info(summary)
@@ -749,10 +979,29 @@ class CoordinateResolver:
                     aliases.add(alias.lower())
         return aliases
 
-    def _coerce_ncbi_gene_genomic_info(self, summary: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def _coerce_ncbi_gene_genomic_info(
+        self,
+        summary: dict[str, Any],
+        preferred_accessions: Optional[set[str]] = None,
+        require_preferred: bool = False,
+    ) -> Optional[dict[str, Any]]:
         genomicinfo = summary.get("genomicinfo")
         if not isinstance(genomicinfo, list):
             return None
+        preferred = {acc for acc in (preferred_accessions or set()) if acc}
+        if preferred:
+            for item in genomicinfo:
+                if not isinstance(item, dict):
+                    continue
+                chr_start = _to_int(item.get("chrstart"))
+                chr_stop = _to_int(item.get("chrstop"))
+                chr_accver = self._coerce_str(item.get("chraccver"))
+                if chr_start is None or chr_stop is None or not chr_accver:
+                    continue
+                if _normalize_accession(chr_accver) in preferred:
+                    return item
+            if require_preferred:
+                return None
         for item in genomicinfo:
             if not isinstance(item, dict):
                 continue
@@ -768,8 +1017,14 @@ class CoordinateResolver:
         summary: dict[str, Any],
         aliases: list[str],
         organism_name: str,
+        accessions: Optional[list[str]] = None,
     ) -> Optional[dict[str, Any]]:
-        genomic_info = self._coerce_ncbi_gene_genomic_info(summary)
+        preferred_accessions = {_normalize_accession(acc) for acc in (accessions or []) if acc}
+        genomic_info = self._coerce_ncbi_gene_genomic_info(
+            summary,
+            preferred_accessions=preferred_accessions,
+            require_preferred=bool(preferred_accessions),
+        )
         if not genomic_info:
             return None
 

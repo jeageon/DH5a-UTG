@@ -14,7 +14,6 @@ from src.config import (
     DEFAULT_FEATURES,
     DEFAULT_FLANK,
     DH5A_ACCESSION,
-    DH5A_NAME,
     DH5A_TAXID,
     DEFAULT_TIMEOUT,
     DEFAULT_RETRIES,
@@ -131,7 +130,7 @@ def _run_pipeline(
         "coordinate_source": coordinates.coordinate_source,
         "ncbi_accession": coordinates.ncbi_accession,
         "ncbi_genome_length": coordinates.ncbi_genome_length,
-        "organism": DH5A_NAME,
+        "organism": coordinates.species,
         "assembly": coordinates.assembly_name,
         "region": (
             f"{coordinates.seq_region_name}:{coordinates.ext_start_1based}-"
@@ -165,10 +164,31 @@ def _run_pipeline(
 
 def _to_feature_rows(features: SequenceRecordBundle) -> list[dict[str, object]]:
     items: list[dict[str, object]] = []
+    generic_labels = {"cds", "gene", "exon", "intron", "mrna", "misc_feature", "misc"}
+
+    def _choose_display_name(feature: NegativeFeature) -> str:
+        for value in (
+            feature.attributes.get("gene_name"),
+            feature.attributes.get("gene"),
+            feature.attributes.get("locus_tag"),
+            feature.attributes.get("old_locus_tag"),
+            feature.attributes.get("protein_id"),
+            feature.attributes.get("product"),
+            feature.attributes.get("annotation_type"),
+        ):
+            if value is None:
+                continue
+            text = str(value).strip()
+            if not text or text.lower() in generic_labels:
+                continue
+            return text
+        return feature.feature_type
+
     for idx, feature in enumerate(features.features, start=1):
-        gene_name = feature.attributes.get("gene_name", "")
-        annotation_type = feature.attributes.get("annotation_type", "")
+        gene_name = _choose_display_name(feature)
         product = feature.attributes.get("product", "")
+        annotation_type = feature.attributes.get("annotation_type", "")
+        product_display = product or feature.description
         items.append(
             {
                 "idx": idx,
@@ -179,7 +199,7 @@ def _to_feature_rows(features: SequenceRecordBundle) -> list[dict[str, object]]:
                 "score": feature.score,
                 "annotation_type": annotation_type,
                 "gene_name": gene_name,
-                "product": product,
+                "product": product_display,
                 "description": feature.description,
             }
         )
@@ -194,7 +214,7 @@ def _maybe_float(value: float) -> float:
 
 def main() -> None:
     st.title("DH5a-UTG")
-    st.caption("DH5a(E. coli K-12 계열 기준) 주변 gDNA 추출 + 간섭 feature 표시 도구")
+    st.caption("NCBI GenBank accession 기준으로 주변 gDNA 추출 + 간섭 feature 표시 도구")
 
     with st.expander("실행 설정", expanded=True):
         query = st.text_input("유전자명 또는 UniProt ID", value="", help="예: lacZ, xylR, P04637")
@@ -207,7 +227,11 @@ def main() -> None:
         flank_mode = st.selectbox("flank 계산 방식", options=["genomic", "strand_relative"], index=0)
         mask = st.selectbox("mask", options=["none", "soft", "hard"], index=0)
         taxid = st.number_input("NCBI taxid", min_value=1, value=DH5A_TAXID, step=1)
-        ncbi_accession = st.text_input("NCBI nuccore accession", value=DH5A_ACCESSION)
+        ncbi_accession = st.text_input(
+            "NCBI nuccore accession",
+            value=DH5A_ACCESSION,
+            help="예: CP076470, NC_000913.3. 값 변경 시 해당 GenBank 염색체/플라스미드 기준으로 분석 대상을 전환합니다.",
+        )
         st.markdown("Feature")
         selected_features = st.multiselect(
             "표시할 feature",

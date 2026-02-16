@@ -35,7 +35,21 @@ def _as_location(start: int, end: int, strand: Optional[int]):
 def _feature_qualifiers(feature):
     qualifiers: dict[str, list[str]] = {}
     qualifiers["note"] = _flatten_qualifier_value(feature.description)
-    qualifiers["label"] = [feature.feature_type]
+    gene_name = (
+        feature.attributes.get("gene_name")
+        or feature.attributes.get("gene")
+        or feature.attributes.get("locus_tag")
+        or feature.attributes.get("old_locus_tag")
+        or feature.attributes.get("protein_id")
+    )
+    if isinstance(gene_name, str):
+        labels = {item.lower() for item in ["cds", "gene", "mrna", "exon", "misc_feature", "misc", "trna", "rrna"]}
+        if not gene_name or str(gene_name).strip().lower() in labels:
+            qualifiers["label"] = [feature.feature_type]
+        else:
+            qualifiers["label"] = [str(gene_name)]
+    else:
+        qualifiers["label"] = [feature.feature_type]
     qualifiers["source"] = [feature.source]
     if feature.score is not None:
         qualifiers["score"] = [f"{feature.score}"]
@@ -52,6 +66,11 @@ def _build_record(bundle: SequenceRecordBundle) -> SeqRecord:
     coords = bundle.coordinates
     source_label = "ENSEMBL" if coords.coordinate_source == "ensembl" else "NCBI"
     display = coords.query_gene or coords.uniprot_id
+    ncbi_accession = coords.ncbi_accession or coords.seq_region_name
+    if ncbi_accession:
+        source_id_line = f"{source_label} reference {ncbi_accession}"
+    else:
+        source_id_line = source_label
 
     source_db_xrefs: list[str] = []
     if coords.uniprot_id:
@@ -68,7 +87,7 @@ def _build_record(bundle: SequenceRecordBundle) -> SeqRecord:
         description=(
             f"DH5a-UTG target region for {display} "
             f"({coords.assembly_name} {coords.seq_region_name}:{coords.ext_start_1based}-{coords.ext_end_1based}, "
-            f"strand={coords.strand}, source={source_label})"
+            f"strand={coords.strand}, source={source_id_line})"
         ),
     )
     record.annotations["molecule_type"] = "DNA"

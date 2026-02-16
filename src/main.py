@@ -8,7 +8,6 @@ import click
 from .config import (
     CACHE_DIR,
     DH5A_ACCESSION,
-    DH5A_NAME,
     DH5A_TAXID,
     DEFAULT_FEATURES,
     DEFAULT_FLANK,
@@ -172,7 +171,7 @@ def cli(
             "coordinate_source": coordinates.coordinate_source,
             "ncbi_accession": coordinates.ncbi_accession,
             "ncbi_genome_length": coordinates.ncbi_genome_length,
-            "organism": DH5A_NAME,
+            "organism": coordinates.species,
             "assembly": coordinates.assembly_name,
             "region": f"{coordinates.seq_region_name}:{coordinates.ext_start_1based}-{coordinates.ext_end_1based}:{coordinates.strand}",
             "flank_bp": flank,

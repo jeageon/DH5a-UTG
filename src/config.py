@@ -7,6 +7,9 @@ from typing import Tuple
 
 DEFAULT_FEATURES = [
     "annotation",
+    "promoter",
+    "terminator",
+    "rbs",
     "palindrome",
     "inverted_repeat",
     "low_complexity",
@@ -77,8 +80,13 @@ class FeatureScanOptions:
 
 
 GENBANK_FEATURE_MAP = {
-    "annotation": "misc_feature",
     "gene": "gene",
+    "mrna": "mRNA",
+    "exon": "exon",
+    "intron": "intron",
+    "five_prime_utr": "five_prime_UTR",
+    "three_prime_utr": "three_prime_UTR",
+    "misc_feature": "misc_feature",
     "cds": "CDS",
     "trna": "tRNA",
     "rrna": "rRNA",
@@ -96,4 +104,12 @@ GENBANK_FEATURE_MAP = {
     "palindrome": "misc_feature",
     "inverted_repeat": "misc_feature",
     "tandem_repeat": "misc_feature",
+    "promoter": "promoter",
+    "terminator": "misc_feature",
+    "rbs": "misc_feature",
+    "operator": "misc_feature",
+    "protein_binding_site": "protein_binding_site",
+    "primer_bind": "primer_bind",
+    "repeat_unit": "repeat_unit",
+    "enhancer": "enhancer",
 }

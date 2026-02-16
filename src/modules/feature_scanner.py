@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 from io import StringIO
 
@@ -24,6 +25,9 @@ from ..utils.seq_utils import (
     scan_homopolymers,
     scan_low_complexity,
     scan_inverted_repeats,
+    scan_terminator_like,
+    scan_promoter_like,
+    scan_rbs_like,
     scan_palindromes,
     scan_tandem_repeats,
 )
@@ -49,6 +53,90 @@ def _to_int(value: Any, default: Optional[int] = None) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _extract_gene_from_note(note: Any) -> Optional[str]:
+    if not note:
+        return None
+    text = str(note)
+    matches = re.findall(
+        r"\b(gene|locus_tag|old_locus_tag|gene_name)\s*[:=]\s*([A-Za-z0-9_\-\.]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not matches:
+        return None
+    gene_like = None
+    # prefer explicit gene-like labels
+    for key, value in matches:
+        if key.lower() == "gene":
+            return value
+    for key, value in matches:
+        if key.lower() in {"gene_name", "locus_tag", "old_locus_tag"}:
+            gene_like = value
+            break
+    return gene_like
+
+
+def _best_gene_name(
+    attr_map: dict[str, Any],
+    note: Optional[Any] = None,
+) -> Optional[str]:
+    return _first_non_null(
+        _normalize_gene_name(attr_map.get("gene")),
+        _normalize_gene_name(attr_map.get("gene_name")),
+        _normalize_gene_name(attr_map.get("locus_tag")),
+        _normalize_gene_name(attr_map.get("old_locus_tag")),
+        _normalize_gene_name(_extract_gene_from_note(note)),
+    )
+
+
+def _normalize_gene_name(value: Optional[Any]) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    if lowered in {"cds", "gene", "mrna", "exon", "intron", "rrna", "trna", "misc_feature", "misc", "unknown"}:
+        return None
+    return text
+
+
+def _find_overlapping_gene(
+    start: int,
+    end: int,
+    gene_intervals: list[tuple[int, int, Optional[str]]],
+) -> Optional[str]:
+    if not gene_intervals:
+        return None
+    overlap_hits: list[tuple[int, str]] = []
+    for gene_start, gene_end, gene_name in gene_intervals:
+        if gene_name is None:
+            continue
+        overlap = max(0, min(end, gene_end) - max(start, gene_start))
+        if overlap > 0:
+            overlap_hits.append((overlap, gene_name))
+        elif gene_name and (abs(start - gene_end) <= 500 or abs(gene_start - end) <= 500):
+            # include a near context fallback only when annotations are shifted by border cases
+            overlap_hits.append((0, gene_name))
+    if not overlap_hits:
+        return None
+    overlap_hits.sort(key=lambda item: item[0], reverse=True)
+    return overlap_hits[0][1]
+
+
+def _is_generic_name(name: Optional[str], annotation_type: Optional[str] = None) -> bool:
+    if not name:
+        return True
+    lowered = str(name).strip().lower()
+    if not lowered:
+        return True
+    if annotation_type:
+        base = str(annotation_type).strip().lower()
+        if lowered == base:
+            return True
+    return lowered in {"cds", "gene", "exon", "intron", "mrna", "trna", "rrna", "misc_feature", "misc"}
 
 
 class FeatureScanner:
@@ -95,6 +183,9 @@ class FeatureScanner:
             "simple": 0,
             "variation": 0,
             "structural_variation": 0,
+            "promoter": 0,
+            "terminator": 0,
+            "rbs": 0,
         }
         normalized = merge_by_type(deduped, merge_gaps=merge_gaps)
         return normalized, warnings
@@ -187,6 +278,8 @@ class FeatureScanner:
         record = records[0]
 
         results: list[NegativeFeature] = []
+        parsed = []
+        gene_intervals: list[tuple[int, int, Optional[str]]] = []
         for item in record.features:
             if not item.type or str(item.type).lower() == "source":
                 continue
@@ -222,23 +315,56 @@ class FeatureScanner:
                 elif value:
                     attrs[key] = value
 
-            annotation_type = str(item.type).lower() if item.type else "annotation"
-            feature_name = _first_non_null(
-                attrs.get("gene"),
-                attrs.get("locus_tag"),
-                attrs.get("protein_id"),
-                attrs.get("product"),
-                attrs.get("note"),
-                annotation_type,
-            )
+            annotation_type = str(item.type).lower() if item.type else "misc_feature"
+            note = attrs.get("note")
+            feature_name = _best_gene_name(attrs, note)
+
+            if annotation_type == "gene":
+                if feature_name:
+                    gene_intervals.append((rel_start, rel_end, feature_name))
+                else:
+                    gene_intervals.append(
+                        (rel_start, rel_end, _first_non_null(attrs.get("locus_tag"), attrs.get("old_locus_tag"))))
+
+            parsed.append((annotation_type, rel_start, rel_end, attrs, note, feature_name))
+
+        for annotation_type, rel_start, rel_end, attrs, note, feature_name in parsed:
+            resolved_gene_name = _normalize_gene_name(feature_name)
+            if resolved_gene_name is None:
+                resolved_gene_name = _best_gene_name(attrs, note)
+            resolved_gene_name = _normalize_gene_name(resolved_gene_name)
+
+            if resolved_gene_name is None and annotation_type == "gene":
+                resolved_gene_name = _first_non_null(
+                    _normalize_gene_name(attrs.get("locus_tag")),
+                    _normalize_gene_name(attrs.get("old_locus_tag")),
+                )
+
+            if resolved_gene_name is None and annotation_type != "gene":
+                resolved_gene_name = _find_overlapping_gene(rel_start, rel_end, gene_intervals)
+                resolved_gene_name = _normalize_gene_name(resolved_gene_name)
+
+            if resolved_gene_name is None and annotation_type != "gene":
+                resolved_gene_name = _first_non_null(
+                    _normalize_gene_name(attrs.get("locus_tag")),
+                    _normalize_gene_name(attrs.get("old_locus_tag")),
+                    _normalize_gene_name(attrs.get("protein_id")),
+                    _normalize_gene_name(attrs.get("gene_name")),
+                    _normalize_gene_name(_extract_gene_from_note(note)),
+                )
+            resolved_gene_name = _normalize_gene_name(resolved_gene_name)
+
+            if resolved_gene_name is None and attrs.get("product"):
+                resolved_gene_name = _normalize_gene_name(attrs.get("product"))
+
             attrs["annotation_type"] = annotation_type
-            if feature_name:
-                attrs["gene_name"] = feature_name
-            description = f"{annotation_type}: {feature_name}" if feature_name else annotation_type
+            if resolved_gene_name:
+                attrs["gene_name"] = resolved_gene_name
+            description = f"{annotation_type}: {resolved_gene_name}" if resolved_gene_name else annotation_type
 
             results.append(
                 NegativeFeature(
-                    feature_type="annotation",
+                    feature_type=annotation_type,
                     start=rel_start,
                     end=rel_end,
                     description=description,
@@ -419,6 +545,54 @@ class FeatureScanner:
                         description=f"Perfect palindrome: length={length} bp",
                         source="internal_structure",
                         score=float(length),
+                    )
+                )
+
+        if "promoter" in requested:
+            promoters = scan_promoter_like(full_sequence)
+            for start, end, motif in promoters:
+                if start >= end or end > seq_len:
+                    continue
+                results.append(
+                    NegativeFeature(
+                        feature_type="promoter",
+                        start=start,
+                        end=end,
+                        description=f"putative promoter-like motif: {motif}",
+                        source="internal_regulatory",
+                        attributes={"motif": motif},
+                    )
+                )
+
+        if "rbs" in requested:
+            rbs_hits = scan_rbs_like(full_sequence)
+            for start, end, motif in rbs_hits:
+                if start >= end or end > seq_len:
+                    continue
+                results.append(
+                    NegativeFeature(
+                        feature_type="rbs",
+                        start=start,
+                        end=end,
+                        description=f"putative RBS-like motif: {motif}",
+                        source="internal_regulatory",
+                        attributes={"motif": motif},
+                    )
+                )
+
+        if "terminator" in requested:
+            terminators = scan_terminator_like(full_sequence)
+            for start, end, motif in terminators:
+                if start >= end or end > seq_len:
+                    continue
+                results.append(
+                    NegativeFeature(
+                        feature_type="terminator",
+                        start=start,
+                        end=end,
+                        description=f"putative terminator-like motif: {motif}",
+                        source="internal_regulatory",
+                        attributes={"motif": motif},
                     )
                 )
 

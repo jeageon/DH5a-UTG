@@ -68,6 +68,12 @@ def _parse_features(features_csv: str) -> list[str]:
 @click.option("--gc-max", default=70.0, type=float)
 @click.option("--homopolymer-at", default=5, type=int)
 @click.option("--homopolymer-gc", default=4, type=int)
+@click.option("--tandem-repeat-min-motif", default=2, type=int)
+@click.option("--tandem-repeat-max-motif", default=6, type=int)
+@click.option("--tandem-repeat-min-copies", default=3, type=int)
+@click.option("--low-complexity-window", default=30, type=int)
+@click.option("--low-complexity-step", default=10, type=int)
+@click.option("--low-complexity-max-entropy", default=1.2, type=float)
 @click.option("--timeout", default=DEFAULT_TIMEOUT, type=float)
 @click.option("--retries", default=DEFAULT_RETRIES, type=int)
 @click.option("--cache", type=click.Choice(["on", "off"]), default="on")
@@ -92,6 +98,12 @@ def cli(
     gc_max: float,
     homopolymer_at: int,
     homopolymer_gc: int,
+    tandem_repeat_min_motif: int,
+    tandem_repeat_max_motif: int,
+    tandem_repeat_min_copies: int,
+    low_complexity_window: int,
+    low_complexity_step: int,
+    low_complexity_max_entropy: float,
     timeout: float,
     retries: int,
     cache: str,
@@ -111,6 +123,12 @@ def cli(
             gc_max=gc_max,
             homopolymer_at=homopolymer_at,
             homopolymer_gc=homopolymer_gc,
+            tandem_repeat_min_motif=tandem_repeat_min_motif,
+            tandem_repeat_max_motif=tandem_repeat_max_motif,
+            tandem_repeat_min_copies=tandem_repeat_min_copies,
+            low_complexity_window=low_complexity_window,
+            low_complexity_step=low_complexity_step,
+            low_complexity_max_entropy=low_complexity_max_entropy,
         )
 
         cache_enabled = cache == "on"

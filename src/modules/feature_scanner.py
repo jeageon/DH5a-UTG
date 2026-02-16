@@ -18,7 +18,15 @@ from ..utils import seq_utils
 from ..utils.coord_utils import build_chunks, ensembl_to_relative
 from ..utils.exceptions import ToolError
 from ..utils.feature_utils import dedupe_features, merge_by_type
-from ..utils.seq_utils import scan_ambiguous, scan_extreme_gc_windows, scan_homopolymers
+from ..utils.seq_utils import (
+    scan_ambiguous,
+    scan_extreme_gc_windows,
+    scan_homopolymers,
+    scan_low_complexity,
+    scan_inverted_repeats,
+    scan_palindromes,
+    scan_tandem_repeats,
+)
 from ..utils.api_client import ApiClient
 
 
@@ -78,7 +86,11 @@ class FeatureScanner:
             "extreme_gc": options.gc_step,
             "homopolymer": 0,
             "ambiguous": 0,
+            "low_complexity": options.low_complexity_step,
+            "tandem_repeat": 0,
             "annotation": 0,
+            "palindrome": 0,
+            "inverted_repeat": 0,
             "repeat": 0,
             "simple": 0,
             "variation": 0,
@@ -358,6 +370,101 @@ class FeatureScanner:
                         end=end,
                         description="Ambiguous base(s) present",
                         source="internal_regex",
+                    )
+                )
+
+        if "low_complexity" in requested:
+            windows = scan_low_complexity(
+                full_sequence,
+                window_size=max(10, options.low_complexity_window),
+                step=max(1, options.low_complexity_step),
+                max_entropy=options.low_complexity_max_entropy,
+            )
+            for start, end, entropy in windows:
+                if start >= end or end > seq_len:
+                    continue
+                results.append(
+                    NegativeFeature(
+                        feature_type="low_complexity",
+                        start=start,
+                        end=end,
+                        description=(
+                            f"Low complexity region: entropy={entropy:.3f} "
+                            f"(<= {options.low_complexity_max_entropy})"
+                        ),
+                        source="internal_entropy",
+                        score=entropy,
+                    )
+                )
+
+        if "palindrome" in requested:
+            palindromes = scan_palindromes(
+                full_sequence,
+                min_len=max(4, options.palindrome_min_len),
+                max_len=max(max(4, options.palindrome_min_len), options.palindrome_max_len),
+            )
+            for start, end, length in palindromes:
+                if start >= end or end > seq_len:
+                    continue
+                results.append(
+                    NegativeFeature(
+                        feature_type="palindrome",
+                        start=start,
+                        end=end,
+                        description=f"Perfect palindrome: length={length} bp",
+                        source="internal_structure",
+                        score=float(length),
+                    )
+                )
+
+        if "tandem_repeat" in requested:
+            repeats = scan_tandem_repeats(
+                full_sequence,
+                min_motif_len=max(1, options.tandem_repeat_min_motif),
+                max_motif_len=max(max(1, options.tandem_repeat_min_motif), options.tandem_repeat_max_motif),
+                min_copies=max(2, options.tandem_repeat_min_copies),
+            )
+            for start, end, motif_len, copies in repeats:
+                if start >= end or end > seq_len:
+                    continue
+                repeat_len = end - start
+                results.append(
+                    NegativeFeature(
+                        feature_type="tandem_repeat",
+                        start=start,
+                        end=end,
+                        description=(
+                            f"Tandem repeat: motif={motif_len} bp x {copies} copies "
+                            f"(length={repeat_len} bp)"
+                        ),
+                        source="internal_repeat",
+                        score=float(repeat_len),
+                        attributes={"motif_len": motif_len, "copies": copies},
+                    )
+                )
+
+        if "inverted_repeat" in requested:
+            repeats = scan_inverted_repeats(
+                full_sequence,
+                min_arm=max(4, options.hairpin_min_arm),
+                max_arm=max(max(4, options.hairpin_min_arm), options.hairpin_max_arm),
+                max_spacer=max(0, options.hairpin_max_spacer),
+            )
+            for start, end, arm, spacer in repeats:
+                if start >= end or end > seq_len:
+                    continue
+                results.append(
+                    NegativeFeature(
+                        feature_type="inverted_repeat",
+                        start=start,
+                        end=end,
+                        description=(
+                            f"Inverted repeat: arm={arm} bp, spacer={spacer} bp, "
+                            "potential hairpin"
+                        ),
+                        source="internal_structure",
+                        score=float(arm),
+                        attributes={"arm": arm, "spacer": spacer},
                     )
                 )
         return results

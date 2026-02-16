@@ -7,6 +7,10 @@ from typing import Tuple
 
 DEFAULT_FEATURES = [
     "annotation",
+    "palindrome",
+    "inverted_repeat",
+    "low_complexity",
+    "tandem_repeat",
     "repeat",
     "simple",
     "variation",
@@ -59,6 +63,17 @@ class FeatureScanOptions:
     gc_max: float = 70.0
     homopolymer_at: int = 5
     homopolymer_gc: int = 4
+    palindrome_min_len: int = 8
+    palindrome_max_len: int = 14
+    hairpin_min_arm: int = 8
+    hairpin_max_arm: int = 12
+    hairpin_max_spacer: int = 20
+    tandem_repeat_min_motif: int = 2
+    tandem_repeat_max_motif: int = 6
+    tandem_repeat_min_copies: int = 3
+    low_complexity_window: int = 30
+    low_complexity_step: int = 10
+    low_complexity_max_entropy: float = 1.2
 
 
 GENBANK_FEATURE_MAP = {
@@ -77,4 +92,8 @@ GENBANK_FEATURE_MAP = {
     "extreme_gc": "misc_feature",
     "homopolymer": "misc_feature",
     "ambiguous": "misc_feature",
+    "low_complexity": "misc_feature",
+    "palindrome": "misc_feature",
+    "inverted_repeat": "misc_feature",
+    "tandem_repeat": "misc_feature",
 }

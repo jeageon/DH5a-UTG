@@ -3,6 +3,7 @@
 `DH5a-UTG`는 미생물(기본: *E. coli* DH5α, NCBI nuccore `CP076470`)의
 특정 유전자를 중심으로 ±10kb 구간의 gDNA를 추출하고,
 동일 구간에 존재하는 간섭 요소를 `negative feature`로 표시해 PCR 삽입 설계를 돕는 도구입니다.
+프라이머/동형상동 arm 설계를 위한 보조로, hairpin 유발 구조나 반복서열도 함께 표시합니다.
 
 기본 전략은 NCBI 우선 해석입니다.
 - 입력이 UniProtID(Pxxxx)인 경우: 해당 단백질/유전자와 연결된 NCBI 유전자 좌표를 우선 탐색
@@ -39,11 +40,13 @@ streamlit run src/webui.py
 - `--ncbi-accession`: `CP076470`
 - `--query-type`: `auto|gene_name|uniprot_id`
 - `--flank-mode`: `genomic` 또는 `strand_relative`
-- `--features`: `repeat,simple,variation,structural_variation,extreme_gc,homopolymer,ambiguous`
+- `--features`: `annotation,low_complexity,palindrome,inverted_repeat,tandem_repeat,repeat,simple,variation,structural_variation,extreme_gc,homopolymer,ambiguous`
 - `--mask`: `none|soft|hard` (Ensembl용)
 - `--maf-threshold`: 변이 MAF 임계값
 - `--gc-window`, `--gc-step`, `--gc-min`, `--gc-max`
 - `--homopolymer-at`, `--homopolymer-gc`
+- `--tandem-repeat-min-motif`, `--tandem-repeat-max-motif`, `--tandem-repeat-min-copies`
+- `--low-complexity-window`, `--low-complexity-step`, `--low-complexity-max-entropy`
 - `--offline`: 캐시만 사용
 
 출력 파일명:

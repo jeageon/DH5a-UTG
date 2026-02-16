@@ -48,10 +48,21 @@ def _run_pipeline(
     gc_max: float,
     homopolymer_at: int,
     homopolymer_gc: int,
+    tandem_repeat_min_motif: int,
+    tandem_repeat_max_motif: int,
+    tandem_repeat_min_copies: int,
+    low_complexity_window: int,
+    low_complexity_step: int,
+    low_complexity_max_entropy: float,
     timeout: float,
     retries: int,
     cache_ttl_hours: int,
     api_cache: bool,
+    palindrome_min_len: int,
+    palindrome_max_len: int,
+    hairpin_min_arm: int,
+    hairpin_max_arm: int,
+    hairpin_max_spacer: int,
     offline: bool = False,
 ) -> tuple[Path, Optional[Path], SequenceRecordBundle, TemporaryDirectory]:
     selected_features = [item for item in features_csv.split(",") if item]
@@ -66,6 +77,17 @@ def _run_pipeline(
         gc_max=gc_max,
         homopolymer_at=homopolymer_at,
         homopolymer_gc=homopolymer_gc,
+        palindrome_min_len=palindrome_min_len,
+        palindrome_max_len=palindrome_max_len,
+        hairpin_min_arm=hairpin_min_arm,
+        hairpin_max_arm=hairpin_max_arm,
+        hairpin_max_spacer=hairpin_max_spacer,
+        tandem_repeat_min_motif=tandem_repeat_min_motif,
+        tandem_repeat_max_motif=tandem_repeat_max_motif,
+        tandem_repeat_min_copies=tandem_repeat_min_copies,
+        low_complexity_window=low_complexity_window,
+        low_complexity_step=low_complexity_step,
+        low_complexity_max_entropy=low_complexity_max_entropy,
     )
 
     api = ApiClient(
@@ -196,6 +218,18 @@ def main() -> None:
         gc_max = st.slider("GC 최대값", min_value=0.0, max_value=100.0, value=70.0, step=1.0)
         homopolymer_at = st.number_input("Homopolymer 길이", min_value=3, max_value=50, value=5)
         homopolymer_gc = st.number_input("Homopolymer GC", min_value=2, max_value=20, value=4)
+        st.markdown("Primer/ARM 방해 구조 스캔")
+        palindrome_min_len = st.number_input("완전 palindrome 최소 길이", min_value=4, max_value=30, value=8, step=1)
+        palindrome_max_len = st.number_input("완전 palindrome 최대 길이", min_value=4, max_value=30, value=14, step=1)
+        hairpin_min_arm = st.number_input("inverted repeat arm 최소 길이", min_value=4, max_value=30, value=8, step=1)
+        hairpin_max_arm = st.number_input("inverted repeat arm 최대 길이", min_value=4, max_value=30, value=12, step=1)
+        hairpin_max_spacer = st.number_input("헤어핀 spacer 최대 길이", min_value=0, max_value=200, value=20, step=1)
+        tandem_repeat_min_motif = st.number_input("Tandem repeat motif 최소 길이", min_value=1, max_value=12, value=2, step=1)
+        tandem_repeat_max_motif = st.number_input("Tandem repeat motif 최대 길이", min_value=1, max_value=20, value=6, step=1)
+        tandem_repeat_min_copies = st.number_input("Tandem repeat 최소 반복 횟수", min_value=2, max_value=20, value=3, step=1)
+        low_complexity_window = st.number_input("저복잡도 창 길이", min_value=10, max_value=200, value=30, step=5)
+        low_complexity_step = st.number_input("저복잡도 sliding step", min_value=1, max_value=100, value=10, step=1)
+        low_complexity_max_entropy = st.number_input("저복잡도 최대 엔트로피", min_value=0.1, max_value=2.0, value=1.2, step=0.1)
 
     with st.expander("네트워크/캐시 설정", expanded=False):
         timeout = st.number_input("API timeout", min_value=1.0, max_value=120.0, value=DEFAULT_TIMEOUT, step=1.0)
@@ -242,6 +276,17 @@ def main() -> None:
                 retries=int(retries),
                 cache_ttl_hours=int(cache_ttl_hours),
                 api_cache=api_cache,
+                palindrome_min_len=int(palindrome_min_len),
+                palindrome_max_len=int(palindrome_max_len),
+                hairpin_min_arm=int(hairpin_min_arm),
+                hairpin_max_arm=int(hairpin_max_arm),
+                hairpin_max_spacer=int(hairpin_max_spacer),
+                tandem_repeat_min_motif=int(tandem_repeat_min_motif),
+                tandem_repeat_max_motif=int(tandem_repeat_max_motif),
+                tandem_repeat_min_copies=int(tandem_repeat_min_copies),
+                low_complexity_window=int(low_complexity_window),
+                low_complexity_step=int(low_complexity_step),
+                low_complexity_max_entropy=_maybe_float(low_complexity_max_entropy),
                 offline=offline,
             )
             gb_path, metadata_path, bundle, tmp_dir = result
@@ -287,6 +332,7 @@ def main() -> None:
                 "feature_count": len(bundle.features),
             }
             metadata_bytes = json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8")
+            gb_bytes = gb_path.read_bytes()
 
             st.subheader("결과 다운로드")
             st.download_button(

@@ -68,16 +68,16 @@ jobs:
 
       - name: Upload GitHub Release
         if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true') }}
-        uses: softprops/action-gh-release@v2
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref_name }}
           name: DH5a-UTG ${{ github.ref_name }}
-          generate_release_notes: true
-          fail_on_unmatched_files: false
-          append_body: true
-          files: |
+          allowUpdates: true
+          makeLatest: true
+          omitBody: false
+          generateReleaseNotes: true
+          artifacts: |
             artifacts/DH5a-UTG-WebUI.exe
             artifacts/DH5a-UTG-CLI.exe
             artifacts/DH5a-UTG-windows-executables.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -37,20 +37,20 @@ function Resolve-PythonExecutable {
 }
 
 function Invoke-CommandWithOutput {
-    param([string]$Command, [string[]]$Args)
-    Write-Host "Running: $Command $($Args -join ' ')"
+    param([string]$Command, [string[]]$CommandArgs)
+    Write-Host "Running: $Command $($CommandArgs -join ' ')"
 
     $oldLocation = Get-Location
     try {
         Set-Location $ProjectRoot
-        & $Command @Args 2>&1 | ForEach-Object { Write-Host $_ }
+        & $Command @CommandArgs 2>&1 | ForEach-Object { Write-Host $_ }
     }
     finally {
         Set-Location $oldLocation
     }
 
     if ($LASTEXITCODE -ne 0) {
-        throw "Command failed: $Command $($Args -join ' ') (exit $LASTEXITCODE)"
+        throw "Command failed: $Command $($CommandArgs -join ' ') (exit $LASTEXITCODE)"
     }
 }
 
@@ -66,9 +66,9 @@ if ($pythonExe -eq "py -3") {
 }
 
 function Invoke-Python {
-    param([string[]]$Args)
-    $allArgs = $pythonArgs + $Args
-    Invoke-CommandWithOutput -Command $pythonBin -Args $allArgs
+    param([string[]]$PyArgs)
+    $allArgs = $pythonArgs + $PyArgs
+    Invoke-CommandWithOutput -Command $pythonBin -CommandArgs $allArgs
 }
 
 function Ensure-PyInstaller {

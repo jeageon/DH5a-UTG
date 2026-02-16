@@ -99,6 +99,14 @@ WebUI에서는 `NCBI nuccore accession` 입력창에 원하는 GenBank accession
 powershell -ExecutionPolicy Bypass -File .\packaging\windows\build-windows-exe.ps1
 ```
 
+기본 동작은 빌드가 끝나면 바탕화면에 바로가기 아이콘을 자동으로 생성합니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\packaging\windows\build-windows-exe.ps1 -CreateDesktopShortcuts:$false
+```
+
+위처럼 지정하면 바탕화면 바로가지를 만들지 않습니다.
+
 필요시 개발 의존성은 아래로 설치할 수 있습니다.
 
 ```powershell

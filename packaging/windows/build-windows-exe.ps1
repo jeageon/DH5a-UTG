@@ -4,6 +4,8 @@ param(
     [string]$Mode = "onefile",
     [switch]$BuildCLI,
     [switch]$BuildInstaller,
+    [switch]$CreateDesktopShortcuts = $true,
+    [string]$ShortcutFolder = "",
     [string]$OutputDir = "dist",
     [string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 )
@@ -84,6 +86,43 @@ $oneFileArg = if ($Mode -eq "onefile") { "--onefile" } else { "--onedir" }
 $webuiData = '"' + "$ProjectRoot\src;src" + '"'
 $webuiBootstrap = '"' + (Join-Path $ProjectRoot "src\webui_bootstrap.py") + '"'
 $cliEntry = '"' + (Join-Path $ProjectRoot "src\main.py") + '"'
+$desktopShortcutFolder = if ($ShortcutFolder) { $ShortcutFolder } else { [Environment]::GetFolderPath("Desktop") }
+
+function New-DesktopShortcut {
+    param(
+        [string]$Name,
+        [string]$Target,
+        [string]$WorkDir = $ProjectRoot
+    )
+
+    if (-not (Test-Path $Target)) {
+        throw "Target executable not found: $Target"
+    }
+
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcutPath = Join-Path $desktopShortcutFolder ("$Name.lnk")
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $Target
+    $shortcut.WorkingDirectory = $WorkDir
+    $shortcut.WindowStyle = 1
+    $shortcut.Description = "DH5a-UTG"
+    $shortcut.Save()
+    Write-Host "Created desktop shortcut: $shortcutPath"
+}
+
+function New-ShortcutSet {
+    param(
+        [bool]$BuildCLIExecutable
+    )
+
+    $webuiExe = Join-Path $ProjectRoot ("$OutputDir\DH5a-UTG-WebUI.exe")
+    New-DesktopShortcut -Name "DH5aUTG-WebUI" -Target $webuiExe -WorkDir $ProjectRoot
+
+    if ($BuildCLIExecutable) {
+        $cliExe = Join-Path $ProjectRoot ("$OutputDir\DH5a-UTG-CLI.exe")
+        New-DesktopShortcut -Name "DH5aUTG-CLI" -Target $cliExe -WorkDir $ProjectRoot
+    }
+}
 
 Ensure-PyInstaller
 
@@ -140,6 +179,10 @@ if ($BuildInstaller) {
     } else {
         & iscc (Join-Path $PSScriptRoot "dh5a_utg_setup.iss")
     }
+}
+
+if ($CreateDesktopShortcuts) {
+    New-ShortcutSet -BuildCLIExecutable $cliBuilt
 }
 
 Write-Host "Done. Output:"

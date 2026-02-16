@@ -12,6 +12,9 @@ on:
         default: "false"
         type: string
 
+permissions:
+  contents: write
+
 jobs:
   build-windows-exe:
     runs-on: windows-latest
@@ -38,12 +41,23 @@ jobs:
         run: |
           .\packaging\windows\build-windows-exe.ps1 -BuildCLI -CreateDesktopShortcuts:$false
 
+      - name: Verify built executables
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .\dist\DH5a-UTG-WebUI.exe)) {
+            throw "Missing .\\dist\\DH5a-UTG-WebUI.exe"
+          }
+          if (-not (Test-Path .\dist\DH5a-UTG-CLI.exe)) {
+            throw "Missing .\\dist\\DH5a-UTG-CLI.exe"
+          }
+
       - name: Prepare release files
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path artifacts -Force | Out-Null
           Copy-Item .\dist\DH5a-UTG-WebUI.exe .\artifacts\
           Copy-Item .\dist\DH5a-UTG-CLI.exe .\artifacts\
+          Copy-Item README.md .\artifacts\README.md
           Compress-Archive -Path .\artifacts\* -DestinationPath .\artifacts\DH5a-UTG-windows-executables.zip -Force
 
       - name: Upload artifacts
@@ -53,12 +67,15 @@ jobs:
           path: artifacts
 
       - name: Upload GitHub Release
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          name: DH5a-UTG ${{ github.ref_name }}
+          generate_release_notes: true
           files: |
-            artifacts/DH5a-UTG-WebUI.exe
-            artifacts/DH5a-UTG-CLI.exe
-            artifacts/DH5a-UTG-windows-executables.zip
+            artifacts\DH5a-UTG-WebUI.exe
+            artifacts\DH5a-UTG-CLI.exe
+            artifacts\DH5a-UTG-windows-executables.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

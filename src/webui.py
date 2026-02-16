@@ -166,6 +166,9 @@ def _run_pipeline(
 def _to_feature_rows(features: SequenceRecordBundle) -> list[dict[str, object]]:
     items: list[dict[str, object]] = []
     for idx, feature in enumerate(features.features, start=1):
+        gene_name = feature.attributes.get("gene_name", "")
+        annotation_type = feature.attributes.get("annotation_type", "")
+        product = feature.attributes.get("product", "")
         items.append(
             {
                 "idx": idx,
@@ -174,6 +177,9 @@ def _to_feature_rows(features: SequenceRecordBundle) -> list[dict[str, object]]:
                 "end": feature.end,
                 "source": feature.source,
                 "score": feature.score,
+                "annotation_type": annotation_type,
+                "gene_name": gene_name,
+                "product": product,
                 "description": feature.description,
             }
         )

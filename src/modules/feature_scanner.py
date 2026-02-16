@@ -222,14 +222,19 @@ class FeatureScanner:
                 elif value:
                     attrs[key] = value
 
+            annotation_type = str(item.type).lower() if item.type else "annotation"
             feature_name = _first_non_null(
                 attrs.get("gene"),
                 attrs.get("locus_tag"),
+                attrs.get("protein_id"),
                 attrs.get("product"),
                 attrs.get("note"),
-                item.type,
+                annotation_type,
             )
-            description = f"{item.type}: {feature_name}" if feature_name else str(item.type)
+            attrs["annotation_type"] = annotation_type
+            if feature_name:
+                attrs["gene_name"] = feature_name
+            description = f"{annotation_type}: {feature_name}" if feature_name else annotation_type
 
             results.append(
                 NegativeFeature(

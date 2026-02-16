@@ -41,22 +41,19 @@ jobs:
         run: |
           .\packaging\windows\build-windows-exe.ps1 -BuildCLI -CreateDesktopShortcuts:$false
 
-      - name: Verify built executables
-        shell: pwsh
-        run: |
-          if (-not (Test-Path .\dist\DH5a-UTG-WebUI.exe)) {
-            throw "Missing .\\dist\\DH5a-UTG-WebUI.exe"
-          }
-          if (-not (Test-Path .\dist\DH5a-UTG-CLI.exe)) {
-            throw "Missing .\\dist\\DH5a-UTG-CLI.exe"
-          }
-
       - name: Prepare release files
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path artifacts -Force | Out-Null
-          Copy-Item .\dist\DH5a-UTG-WebUI.exe .\artifacts\
-          Copy-Item .\dist\DH5a-UTG-CLI.exe .\artifacts\
+          $webui = Get-ChildItem -Path .\dist -Recurse -Filter "DH5a-UTG-WebUI.exe" | Select-Object -First 1
+          if (-not $webui) { throw "DH5a-UTG-WebUI.exe not found in dist" }
+          Copy-Item $webui.FullName .\artifacts\DH5a-UTG-WebUI.exe -Force
+
+          $cli = Get-ChildItem -Path .\dist -Recurse -Filter "DH5a-UTG-CLI.exe" | Select-Object -First 1
+          if (-not $cli) { throw "DH5a-UTG-CLI.exe not found in dist" }
+          Copy-Item $cli.FullName .\artifacts\DH5a-UTG-CLI.exe -Force
+
+          Get-ChildItem -Path .\dist -Recurse -File | Where-Object { $_.Name -like "*DH5a-UTG*.exe" } | ForEach-Object { Write-Host $_.FullName }
           Copy-Item README.md .\artifacts\README.md
           Compress-Archive -Path .\artifacts\* -DestinationPath .\artifacts\DH5a-UTG-windows-executables.zip -Force
           Get-ChildItem -Path .\artifacts -Force | ForEach-Object { Write-Host $_.FullName }
@@ -78,7 +75,7 @@ jobs:
           gh config set prompt disabled
           gh release view $tag --repo "${{ github.repository }}" > $null 2>&1
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo "${{ github.repository }}" --title $releaseTitle --generate-notes --notes "Auto generated release for DH5a-UTG Windows executables."
+            gh release create $tag --repo "${{ github.repository }}" --title $releaseTitle --generate-notes
           }
           gh release upload $tag --repo "${{ github.repository }}" `
             "artifacts/DH5a-UTG-WebUI.exe#DH5a-UTG-WebUI.exe" `

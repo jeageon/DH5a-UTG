@@ -115,13 +115,52 @@ function New-ShortcutSet {
         [bool]$BuildCLIExecutable
     )
 
-    $webuiExe = Join-Path $ProjectRoot ("$OutputDir\DH5a-UTG-WebUI.exe")
+    $webuiExe = Resolve-ExePath -Name "DH5a-UTG-WebUI"
     New-DesktopShortcut -Name "DH5aUTG-WebUI" -Target $webuiExe -WorkDir $ProjectRoot
 
     if ($BuildCLIExecutable) {
-        $cliExe = Join-Path $ProjectRoot ("$OutputDir\DH5a-UTG-CLI.exe")
+        $cliExe = Resolve-ExePath -Name "DH5a-UTG-CLI"
         New-DesktopShortcut -Name "DH5aUTG-CLI" -Target $cliExe -WorkDir $ProjectRoot
     }
+}
+
+function Resolve-ExePath {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Name
+    )
+
+    $candidates = @(
+        (Join-Path $ProjectRoot (Join-Path $OutputDir ("$Name.exe"))),
+        (Join-Path $ProjectRoot (Join-Path $OutputDir (Join-Path $Name "$Name.exe")))
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    Write-Host "Could not resolve built exe for $Name. Dist folder contents:"
+    if (Test-Path (Join-Path $ProjectRoot $OutputDir)) {
+        Get-ChildItem -Path (Join-Path $ProjectRoot $OutputDir) -Recurse -File | ForEach-Object { Write-Host $_.FullName }
+    } else {
+        Write-Host "Dist folder does not exist: $(Join-Path $ProjectRoot $OutputDir)"
+    }
+    return ""
+}
+
+function Assert-Executable {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Name
+    )
+
+    $path = Resolve-ExePath -Name $Name
+    if (-not $path) {
+        throw "Missing .\\$OutputDir\\$Name.exe (or .\\$OutputDir\\$Name\\$Name.exe)"
+    }
+    return $path
 }
 
 Ensure-PyInstaller
@@ -136,6 +175,8 @@ Invoke-Python @(
     "PyInstaller",
     "--noconfirm",
     "--clean",
+    "--distpath",
+    (Join-Path $ProjectRoot $OutputDir),
     "--name",
     "DH5a-UTG-WebUI",
     $oneFileArg,
@@ -147,6 +188,7 @@ Invoke-Python @(
     $webuiData,
     $webuiBootstrap
 )
+$webuiExe = Assert-Executable -Name "DH5a-UTG-WebUI"
 
 if ($BuildCLI) {
     Write-Host "Build CLI EXE..."
@@ -154,6 +196,8 @@ if ($BuildCLI) {
         "PyInstaller",
         "--noconfirm",
         "--clean",
+        "--distpath",
+        (Join-Path $ProjectRoot $OutputDir),
         "--name",
         "DH5a-UTG-CLI",
         $oneFileArg,
@@ -161,8 +205,9 @@ if ($BuildCLI) {
         "src",
         $cliEntry
     )
+    $cliExe = Assert-Executable -Name "DH5a-UTG-CLI"
     $cliBuilt = $true
-} elseif (Test-Path "$ProjectRoot\dist\DH5a-UTG-CLI.exe") {
+} elseif (Test-Path (Join-Path $ProjectRoot (Join-Path $OutputDir "DH5a-UTG-CLI.exe"))) {
     $cliBuilt = $true
 }
 
@@ -186,4 +231,4 @@ if ($CreateDesktopShortcuts) {
 }
 
 Write-Host "Done. Output:"
-Get-ChildItem -Path "$ProjectRoot\$OutputDir" -Filter "DH5a-UTG-WebUI*"
+Get-ChildItem -Path (Join-Path $ProjectRoot $OutputDir) -Recurse | Where-Object { $_.Name -like "*DH5a-UTG-*.exe" } | ForEach-Object { Write-Host $_.FullName }

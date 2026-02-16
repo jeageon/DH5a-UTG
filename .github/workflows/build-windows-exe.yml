@@ -59,6 +59,7 @@ jobs:
           Copy-Item .\dist\DH5a-UTG-CLI.exe .\artifacts\
           Copy-Item README.md .\artifacts\README.md
           Compress-Archive -Path .\artifacts\* -DestinationPath .\artifacts\DH5a-UTG-windows-executables.zip -Force
+          Get-ChildItem -Path .\artifacts -Force | ForEach-Object { Write-Host $_.FullName }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -68,16 +69,19 @@ jobs:
 
       - name: Upload GitHub Release
         if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true') }}
-        uses: ncipollo/release-action@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.ref_name }}
-          name: DH5a-UTG ${{ github.ref_name }}
-          allowUpdates: true
-          makeLatest: true
-          omitBody: false
-          generateReleaseNotes: true
-          artifacts: |
-            artifacts/DH5a-UTG-WebUI.exe
-            artifacts/DH5a-UTG-CLI.exe
-            artifacts/DH5a-UTG-windows-executables.zip
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $releaseTitle = "DH5a-UTG $tag"
+          gh config set prompt disabled
+          gh release view $tag --repo "${{ github.repository }}" > $null 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo "${{ github.repository }}" --title $releaseTitle --generate-notes --notes "Auto generated release for DH5a-UTG Windows executables."
+          }
+          gh release upload $tag --repo "${{ github.repository }}" `
+            "artifacts/DH5a-UTG-WebUI.exe#DH5a-UTG-WebUI.exe" `
+            "artifacts/DH5a-UTG-CLI.exe#DH5a-UTG-CLI.exe" `
+            "artifacts/DH5a-UTG-windows-executables.zip#DH5a-UTG-windows-executables.zip" `
+            --clobber

@@ -5,3 +5,7 @@ __pycache__/
 *.pyd
 data/output/
 data/cache/
+build/
+dist/
+packaging/windows/installer/
+*.spec

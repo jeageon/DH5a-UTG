@@ -89,3 +89,43 @@ WebUI에서는 `NCBI nuccore accession` 입력창에 원하는 GenBank accession
 
 실행 중 유전자 단위 간섭(예: 기존 주석/기능 요소)까지 포함하려면 `annotation`을 기본값에 추가해 두었으며,
 필요 시 `--features annotation,repeat,...` 형태로 원하는 항목만 지정할 수 있습니다.
+
+### Windows 설치형 EXE 생성
+
+`PyInstaller`로 실행 파일(.exe)도 만들 수 있습니다.  
+아래는 `WebUI` 단일 실행 파일을 만들기 위한 기본 명령입니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\packaging\windows\build-windows-exe.ps1
+```
+
+필요시 개발 의존성은 아래로 설치할 수 있습니다.
+
+```powershell
+pip install -r requirements-dev.txt
+```
+
+생성 결과:
+- `dist\DH5a-UTG-WebUI.exe`
+
+`CLI`도 같이 만들려면:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\packaging\windows\build-windows-exe.ps1 -BuildCLI
+```
+
+생성 결과:
+- `dist\DH5a-UTG-WebUI.exe`
+- `dist\DH5a-UTG-CLI.exe`
+
+설치형 exe가 필요하면 Inno Setup이 설치된 Windows에서 아래처럼 실행합니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\packaging\windows\build-windows-exe.ps1 -BuildCLI -BuildInstaller
+```
+
+생성 결과:
+- `packaging/windows/installer/DH5a-UTG-Setup.exe`
+
+주의:
+- 설치형 exe는 별도 의존성 패키징이 더 크고 빌드 시간이 오래 걸릴 수 있습니다.

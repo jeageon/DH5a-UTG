@@ -38,25 +38,19 @@ function Resolve-PythonExecutable {
 
 function Invoke-CommandWithOutput {
     param([string]$Command, [string[]]$Args)
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $Command
-    $psi.Arguments = ($Args -join " ")
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.WorkingDirectory = $ProjectRoot
+    Write-Host "Running: $Command $($Args -join ' ')"
 
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-    $null = $proc.Start()
-    $proc.WaitForExit()
-    $stdout = $proc.StandardOutput.ReadToEnd()
-    $stderr = $proc.StandardError.ReadToEnd()
-    Write-Host $stdout
-    if ($stderr) { Write-Host $stderr }
+    $oldLocation = Get-Location
+    try {
+        Set-Location $ProjectRoot
+        & $Command @Args 2>&1 | ForEach-Object { Write-Host $_ }
+    }
+    finally {
+        Set-Location $oldLocation
+    }
 
-    if ($proc.ExitCode -ne 0) {
-        throw "Command failed: $Command $($Args -join ' ') (exit $($proc.ExitCode))"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command failed: $Command $($Args -join ' ') (exit $LASTEXITCODE)"
     }
 }
 
@@ -83,9 +77,9 @@ function Ensure-PyInstaller {
 }
 
 $oneFileArg = if ($Mode -eq "onefile") { "--onefile" } else { "--onedir" }
-$webuiData = '"' + "$ProjectRoot\src;src" + '"'
-$webuiBootstrap = '"' + (Join-Path $ProjectRoot "src\webui_bootstrap.py") + '"'
-$cliEntry = '"' + (Join-Path $ProjectRoot "src\main.py") + '"'
+$webuiData = "$ProjectRoot\src;src"
+$webuiBootstrap = Join-Path $ProjectRoot "src\webui_bootstrap.py"
+$cliEntry = Join-Path $ProjectRoot "src\main.py"
 $desktopShortcutFolder = if ($ShortcutFolder) { $ShortcutFolder } else { [Environment]::GetFolderPath("Desktop") }
 
 function New-DesktopShortcut {
@@ -130,24 +124,33 @@ function Resolve-ExePath {
         [string]$Name
     )
 
-    $candidates = @(
+    $expected = @(
         (Join-Path $ProjectRoot (Join-Path $OutputDir ("$Name.exe"))),
         (Join-Path $ProjectRoot (Join-Path $OutputDir (Join-Path $Name "$Name.exe")))
     )
 
-    foreach ($candidate in $candidates) {
+    foreach ($candidate in $expected) {
         if (Test-Path $candidate) {
             return $candidate
         }
     }
 
-    Write-Host "Could not resolve built exe for $Name. Dist folder contents:"
-    if (Test-Path (Join-Path $ProjectRoot $OutputDir)) {
-        Get-ChildItem -Path (Join-Path $ProjectRoot $OutputDir) -Recurse -File | ForEach-Object { Write-Host $_.FullName }
-    } else {
-        Write-Host "Dist folder does not exist: $(Join-Path $ProjectRoot $OutputDir)"
+    Write-Host "Expected path not found for $Name. Scanning workspace for fallback match..."
+    $fallback = Get-ChildItem -Path $ProjectRoot -Recurse -File -Filter "$Name*.exe" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
+
+    if (-not $fallback) {
+        Write-Host "No candidate found with pattern '$Name*.exe'."
+        if (Test-Path (Join-Path $ProjectRoot $OutputDir)) {
+            Write-Host "Dist folder contents:"
+            Get-ChildItem -Path (Join-Path $ProjectRoot $OutputDir) -Recurse -File | ForEach-Object { Write-Host $_.FullName }
+        } else {
+            Write-Host "Dist folder does not exist: $(Join-Path $ProjectRoot $OutputDir)"
+        }
+        return ""
     }
-    return ""
+
+    return $fallback[0].FullName
 }
 
 function Assert-Executable {
@@ -229,6 +232,11 @@ if ($BuildInstaller) {
 if ($CreateDesktopShortcuts) {
     New-ShortcutSet -BuildCLIExecutable $cliBuilt
 }
+
+Write-Host "Workspace exe scan (DH5a-UTG-*.exe):"
+Get-ChildItem -Path $ProjectRoot -Recurse -File -Filter "DH5a-UTG-*.exe" -ErrorAction SilentlyContinue |
+    Sort-Object FullName |
+    ForEach-Object { Write-Host $_.FullName }
 
 Write-Host "Done. Output:"
 Get-ChildItem -Path (Join-Path $ProjectRoot $OutputDir) -Recurse | Where-Object { $_.Name -like "*DH5a-UTG-*.exe" } | ForEach-Object { Write-Host $_.FullName }

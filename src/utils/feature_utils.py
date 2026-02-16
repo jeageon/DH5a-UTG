@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Optional
 
 from ..models.data_schemas import NegativeFeature
 
@@ -23,7 +23,7 @@ def dedupe_features(features: Iterable[NegativeFeature]) -> list[NegativeFeature
 
 def merge_by_type(
     features: Iterable[NegativeFeature],
-    merge_gaps: dict[str, int] | None = None,
+    merge_gaps: Optional[dict[str, int]] = None,
 ) -> list[NegativeFeature]:
     merge_gaps = merge_gaps or {}
     feature_map: dict[str, list[NegativeFeature]] = {}
@@ -82,4 +82,3 @@ def merge_by_type(
             )
         )
     return dedupe_features(merged)
-

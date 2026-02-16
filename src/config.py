@@ -6,6 +6,7 @@ from typing import Tuple
 
 
 DEFAULT_FEATURES = [
+    "annotation",
     "repeat",
     "simple",
     "variation",
@@ -19,11 +20,18 @@ DEFAULT_TIMEOUT = 20.0
 DEFAULT_RETRIES = 5
 DEFAULT_CACHE_TTL_HOURS = 24
 DEFAULT_FLANK = 10_000
+DH5A_ACCESSION = "CP076470"
+DH5A_TAXID = 511145
+DH5A_NAME = "Escherichia coli DH5alpha"
 
 EBI_COORDINATES_URL = "https://www.ebi.ac.uk/proteins/api/coordinates/{accession}"
 UNIPROT_IDMAP_RUN = "https://rest.uniprot.org/idmapping/run"
 UNIPROT_IDMAP_STATUS = "https://rest.uniprot.org/idmapping/status/{job_id}"
 UNIPROT_IDMAP_RESULTS = "https://rest.uniprot.org/idmapping/results/{job_id}"
+UNIPROT_ENTRY_URL = "https://rest.uniprot.org/uniprotkb/{accession}.json"
+NCBI_ESEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+NCBI_ESUMMARY = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+NCBI_EFETCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 ENSEMBL_LOOKUP = "https://rest.ensembl.org/lookup/id/{ensembl_id}"
 ENSEMBL_SEQUENCE_REGION = "https://rest.ensembl.org/sequence/region/{species}/{region}"
 ENSEMBL_SEQUENCE_ID = "https://rest.ensembl.org/sequence/id/{ensembl_id}"
@@ -32,6 +40,7 @@ ENSEMBL_OVERLAP = "https://rest.ensembl.org/overlap/region/{species}/{region}"
 OUTPUT_FILE_SUFFIX = ".negfeatures.gb"
 OUTPUT_DIR = Path("data/output")
 CACHE_DIR = Path("data/cache")
+OUTPUT_FASTA_SUFFIX = ".target_region.fasta"
 
 ENSEMBL_OVERLAP_MAX_BP = 5_000_000
 ENSEMBL_OVERLAP_CHUNK_BP = 4_500_000
@@ -53,6 +62,14 @@ class FeatureScanOptions:
 
 
 GENBANK_FEATURE_MAP = {
+    "annotation": "misc_feature",
+    "gene": "gene",
+    "cds": "CDS",
+    "trna": "tRNA",
+    "rrna": "rRNA",
+    "nc_rna": "ncRNA",
+    "rep_origin": "rep_origin",
+    "repeat_region": "repeat_region",
     "repeat": "repeat_region",
     "simple": "repeat_region",
     "variation": "variation",
@@ -61,4 +78,3 @@ GENBANK_FEATURE_MAP = {
     "homopolymer": "misc_feature",
     "ambiguous": "misc_feature",
 }
-

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime, date
+from datetime import date, datetime
 from pathlib import Path
+from typing import Optional
 
+import json
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqFeature import FeatureLocation, SeqFeature
@@ -21,7 +22,7 @@ def _flatten_qualifier_value(value):
     return [str(value)]
 
 
-def _as_location(start: int, end: int, strand: int | None):
+def _as_location(start: int, end: int, strand: Optional[int]):
     if start < 0:
         start = 0
     if end < start:
@@ -49,18 +50,30 @@ def _feature_qualifiers(feature):
 def _build_record(bundle: SequenceRecordBundle) -> SeqRecord:
     seq = bundle.full_sequence.upper()
     coords = bundle.coordinates
+    source_label = "ENSEMBL" if coords.coordinate_source == "ensembl" else "NCBI"
+    display = coords.query_gene or coords.uniprot_id
+
+    source_db_xrefs: list[str] = []
+    if coords.uniprot_id:
+        source_db_xrefs.append(f"UniProtKB:{coords.uniprot_id}")
+    if coords.ncbi_accession:
+        source_db_xrefs.append(f"NCBI_nuccore:{coords.ncbi_accession}")
+    if coords.ensembl_gene_id:
+        source_db_xrefs.append(f"Ensembl:{coords.ensembl_gene_id}")
+
     record = SeqRecord(
         Seq(seq),
-        id=coords.uniprot_id,
-        name=coords.uniprot_id,
+        id=display,
+        name=display,
         description=(
-            f"UniPcrTemplate gDNA region for {coords.uniprot_id} "
-            f"({coords.assembly_name} {coords.seq_region_name}:{coords.ext_start_1based}-{coords.ext_end_1based}, strand={coords.strand})"
+            f"DH5a-UTG target region for {display} "
+            f"({coords.assembly_name} {coords.seq_region_name}:{coords.ext_start_1based}-{coords.ext_end_1based}, "
+            f"strand={coords.strand}, source={source_label})"
         ),
     )
     record.annotations["molecule_type"] = "DNA"
     record.annotations["organism"] = coords.species
-    record.annotations["taxonomy"] = ["Ensembl"]
+    record.annotations["taxonomy"] = [source_label]
     record.annotations["data_file_division"] = "UNC"
     record.annotations["date"] = date.today().strftime("%d-%b-%Y").upper()
 
@@ -69,10 +82,7 @@ def _build_record(bundle: SequenceRecordBundle) -> SeqRecord:
         type="source",
         qualifiers={
             "organism": [coords.species],
-            "db_xref": [
-                f"UniProtKB:{coords.uniprot_id}",
-                f"Ensembl:{coords.ensembl_gene_id}",
-            ],
+            "db_xref": source_db_xrefs,
             "note": [
                 f"extracted with ±{coords.ext_end_1based - coords.ext_start_1based + 1} bp flank",
                 f"original genomic: {coords.assembly_name} {coords.seq_region_name}:{coords.ext_start_1based}-{coords.ext_end_1based}",
@@ -87,9 +97,9 @@ def _build_record(bundle: SequenceRecordBundle) -> SeqRecord:
         _as_location(gene_start, gene_end, coords.strand),
         type="gene",
         qualifiers={
-            "gene": [coords.display_name or coords.ensembl_gene_id],
-            "db_xref": [f"Ensembl:{coords.ensembl_gene_id}"],
-            "note": ["gene span from Ensembl lookup"],
+            "gene": [coords.display_name or coords.query_gene or coords.ensembl_gene_id or coords.uniprot_id],
+            "db_xref": source_db_xrefs,
+            "note": [f"target span from {source_label}"],
         },
     )
     record.features.append(gene_feature)
@@ -118,10 +128,18 @@ def _feature_counts(features):
     return counts
 
 
-def output_paths(outdir: Path, uniprot_id: str, assembly: str, chr_name: str, ext_start: int, ext_end: int) -> tuple[Path, Path]:
+def output_paths(
+    outdir: Path,
+    record_id: str,
+    assembly: str,
+    chr_name: str,
+    ext_start: int,
+    ext_end: int,
+) -> tuple[Path, Path]:
     safe_chr = "".join(ch if ch.isalnum() else "_" for ch in chr_name)
     safe_asm = "".join(ch if ch.isalnum() else "_" for ch in assembly)
-    base = f"{uniprot_id}.{safe_asm}.{safe_chr}_{ext_start}_{ext_end}"
+    safe_id = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in record_id)
+    base = f"{safe_id}.{safe_asm}.{safe_chr}_{ext_start}_{ext_end}"
     gb_path = outdir / f"{base}{OUTPUT_FILE_SUFFIX}"
     json_path = outdir / f"{base}.metadata.json"
     return gb_path, json_path
@@ -131,11 +149,12 @@ def write_outputs(
     bundle: SequenceRecordBundle,
     outdir: Path,
     write_metadata_json: bool = True,
-) -> tuple[Path, Path | None]:
+) -> tuple[Path, Optional[Path]]:
     outdir.mkdir(parents=True, exist_ok=True)
+    record_id = bundle.coordinates.query_gene or bundle.coordinates.uniprot_id
     gb_path, json_path = output_paths(
         outdir,
-        bundle.coordinates.uniprot_id,
+        record_id,
         bundle.coordinates.assembly_name,
         bundle.coordinates.seq_region_name,
         bundle.coordinates.ext_start_1based,
@@ -152,4 +171,3 @@ def write_outputs(
     else:
         json_path = None
     return gb_path, json_path
-

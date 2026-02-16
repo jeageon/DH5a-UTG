@@ -1,7 +1,12 @@
-# UTG (UniPcrTemplate)
+# DH5a-UTG
 
-`UTG`는 UniProtKB accession 하나로 유전자 주변 gDNA를 조회해 PCR 설계 회피 구간(negative feature)을 계산하고,
-GenBank 파일(`.negfeatures.gb`)을 생성하는 CLI 프로그램입니다.
+`DH5a-UTG`는 미생물(기본: *E. coli* DH5α, NCBI nuccore `CP076470`)의
+특정 유전자를 중심으로 ±10kb 구간의 gDNA를 추출하고,
+동일 구간에 존재하는 간섭 요소를 `negative feature`로 표시해 PCR 삽입 설계를 돕는 도구입니다.
+
+기본 전략은 NCBI 우선 해석입니다.
+- 입력이 UniProtID(Pxxxx)인 경우: 해당 단백질/유전자와 연결된 NCBI 유전자 좌표를 우선 탐색
+- 입력이 유전자명인 경우: NCBI Gene 기반으로 좌표 조회
 
 ## 설치
 
@@ -14,21 +19,27 @@ pip install -r requirements.txt
 ## 실행
 
 ```bash
-python -m src.main P12345 --outdir data/output --flank 10000
+python -m src.main lacZ --query-type gene_name
+python -m src.main P04637 --query-type uniprot_id
 ```
 
-주요 옵션:
+기본값:
 - `--flank`: 유전자 좌우 확장 bp(기본 10000)
+- `--taxid`: `511145` (E. coli DH5α)
+- `--ncbi-accession`: `CP076470`
+- `--query-type`: `auto|gene_name|uniprot_id`
 - `--flank-mode`: `genomic` 또는 `strand_relative`
 - `--features`: `repeat,simple,variation,structural_variation,extreme_gc,homopolymer,ambiguous`
-- `--mask`: `none|soft|hard` (Ensembl repeat mask)
+- `--mask`: `none|soft|hard` (Ensembl용)
 - `--maf-threshold`: 변이 MAF 임계값
 - `--gc-window`, `--gc-step`, `--gc-min`, `--gc-max`
 - `--homopolymer-at`, `--homopolymer-gc`
 - `--offline`: 캐시만 사용
 
 출력 파일명:
-`{UniProt}.{assembly}.{chr}_{extStart}_{extEnd}.negfeatures.gb`
+`{Query}.{assembly}.{chr}_{extStart}_{extEnd}.negfeatures.gb`
 
 동일 basename의 `...metadata.json`도 생성됩니다.
 
+실행 중 유전자 단위 간섭(예: 기존 주석/기능 요소)까지 포함하려면 `annotation`을 기본값에 추가해 두었으며,
+필요 시 `--features annotation,repeat,...` 형태로 원하는 항목만 지정할 수 있습니다.

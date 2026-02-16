@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
+from io import StringIO
+
+from Bio import SeqIO
 
 from ..config import (
+    NCBI_EFETCH,
     ENSEMBL_OVERLAP,
     ENSEMBL_OVERLAP_CHUNK_BP,
     ENSEMBL_OVERLAP_MAX_BP,
@@ -25,14 +29,14 @@ def _first_non_null(*values: Any) -> Any:
     return None
 
 
-def _to_float(value: Any) -> float | None:
+def _to_float(value: Any) -> Optional[float]:
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
 
 
-def _to_int(value: Any, default: int | None = None) -> int | None:
+def _to_int(value: Any, default: Optional[int] = None) -> Optional[int]:
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -47,8 +51,8 @@ class FeatureScanner:
         self,
         coordinates: GenomicCoordinates,
         full_sequence: str,
-        requested_features: list[str] | None = None,
-        options: FeatureScanOptions | None = None,
+        requested_features: Optional[list[str]] = None,
+        options: Optional[FeatureScanOptions] = None,
     ) -> tuple[list[NegativeFeature], list[str]]:
         requested_features = requested_features or list(DEFAULT_FEATURES)
         options = options or FeatureScanOptions()
@@ -57,7 +61,11 @@ class FeatureScanner:
         requested = set(requested_features)
 
         collected: list[NegativeFeature] = []
-        collected.extend(self._scan_overlap(coordinates, requested, seq_len, warnings, options))
+        if coordinates.coordinate_source == "ensembl":
+            collected.extend(self._scan_overlap(coordinates, requested, seq_len, warnings, options))
+        else:
+            warnings.append("NCBI sequence source does not support Ensembl overlap lookup; skipped repeat/variant-based features")
+            collected.extend(self._scan_ncbi_annotations(coordinates, requested, seq_len, warnings))
         collected.extend(self._scan_internal(
             full_sequence,
             requested,
@@ -70,6 +78,7 @@ class FeatureScanner:
             "extreme_gc": options.gc_step,
             "homopolymer": 0,
             "ambiguous": 0,
+            "annotation": 0,
             "repeat": 0,
             "simple": 0,
             "variation": 0,
@@ -87,7 +96,6 @@ class FeatureScanner:
         options: FeatureScanOptions,
     ) -> list[NegativeFeature]:
         del warnings
-        del seq_len
         if not requested.intersection({"repeat", "simple", "variation", "structural_variation"}):
             return []
         features: list[NegativeFeature] = []
@@ -106,7 +114,11 @@ class FeatureScanner:
                 try:
                     params = {"feature": ftype}
                     url = ENSEMBL_OVERLAP.format(species=coordinates.species, region=region)
-                    resp = self.api.get(url, headers={"Content-Type": "application/json"}, params=params)
+                    resp = self.api.get(
+                        url,
+                        headers={"Accept": "application/json"},
+                        params=params,
+                    )
                 except ToolError:
                     continue
                 if not isinstance(resp.json_obj, list):
@@ -118,6 +130,107 @@ class FeatureScanner:
                     features.append(feature)
         return features
 
+    def _scan_ncbi_annotations(
+        self,
+        coordinates: GenomicCoordinates,
+        requested: set[str],
+        seq_len: int,
+        warnings: list[str],
+    ) -> list[NegativeFeature]:
+        if "annotation" not in requested or not coordinates.ncbi_accession:
+            return []
+        if not coordinates.ext_end_1based or coordinates.ext_end_1based < coordinates.ext_start_1based:
+            return []
+        if not coordinates.ncbi_accession:
+            return []
+
+        params = {
+            "db": "nuccore",
+            "id": coordinates.ncbi_accession,
+            "rettype": "gbwithparts",
+            "retmode": "text",
+            "seq_start": coordinates.ext_start_1based,
+            "seq_stop": coordinates.ext_end_1based,
+        }
+        if coordinates.strand == -1:
+            params["strand"] = 2
+        try:
+            resp = self.api.get(
+                NCBI_EFETCH,
+                headers={"Accept": "text/plain"},
+                params=params,
+                disable_cache=True,
+            )
+        except ToolError as exc:
+            warnings.append(f"NCBI annotation fetch failed: {exc}")
+            return []
+
+        try:
+            records = list(SeqIO.parse(StringIO(resp.text or ""), "genbank"))
+        except Exception as exc:
+            warnings.append(f"failed to parse NCBI GenBank annotation: {exc}")
+            return []
+        if not records:
+            return []
+        record = records[0]
+
+        results: list[NegativeFeature] = []
+        for item in record.features:
+            if not item.type or str(item.type).lower() == "source":
+                continue
+            try:
+                raw_start = int(item.location.start)
+                raw_end = int(item.location.end)
+            except Exception:
+                continue
+            if raw_start < 0 or raw_end <= raw_start:
+                continue
+
+            # NCBI may return region-relative or absolute feature coordinates depending on service behavior.
+            # Normalize to region-relative when needed.
+            if raw_end > (coordinates.ext_end_1based - coordinates.ext_start_1based + 1) and raw_start >= coordinates.ext_start_1based:
+                rel_start = raw_start - coordinates.ext_start_1based + 1
+                rel_end = raw_end - coordinates.ext_start_1based + 1
+            else:
+                rel_start = raw_start
+                rel_end = raw_end
+
+            if rel_start < 0:
+                rel_start = 0
+            if rel_end > seq_len:
+                rel_end = seq_len
+            if rel_start >= rel_end:
+                continue
+
+            qualifiers = {str(k).lower(): v for k, v in item.qualifiers.items()}
+            attrs: dict[str, Any] = {}
+            for key, value in qualifiers.items():
+                if isinstance(value, list) and value:
+                    attrs[key] = value[0]
+                elif value:
+                    attrs[key] = value
+
+            feature_name = _first_non_null(
+                attrs.get("gene"),
+                attrs.get("locus_tag"),
+                attrs.get("product"),
+                attrs.get("note"),
+                item.type,
+            )
+            description = f"{item.type}: {feature_name}" if feature_name else str(item.type)
+
+            results.append(
+                NegativeFeature(
+                    feature_type="annotation",
+                    start=rel_start,
+                    end=rel_end,
+                    description=description,
+                    source="ncbi_gb",
+                    attributes=attrs,
+                )
+            )
+        return results
+
     def _to_negative_feature(
         self,
         item: dict[str, Any],
@@ -125,7 +238,7 @@ class FeatureScanner:
         coordinates: GenomicCoordinates,
         seq_len: int,
         maf_threshold: float,
-    ) -> NegativeFeature | None:
+    ) -> Optional[NegativeFeature]:
         if not isinstance(item, dict):
             return None
 

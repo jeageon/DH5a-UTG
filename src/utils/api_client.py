@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlencode
 
 import requests
@@ -17,9 +17,9 @@ from ..config import USER_AGENT
 class ResponseWrapper(BaseModel):
     url: str
     status_code: int
-    headers: dict[str, str] = {}
-    text: str | None = None
-    json_obj: dict[str, Any] | list[Any] | None = None
+    headers: Dict[str, str] = {}
+    text: Optional[str] = None
+    json_obj: Optional[Union[Dict[str, Any], List[Any]]] = None
 
 
 class ApiClient:
@@ -29,7 +29,7 @@ class ApiClient:
         retries: int = 5,
         backoff_factor: float = 1.0,
         cache_enabled: bool = True,
-        cache_path: str | Path | None = None,
+        cache_path: Optional[Union[str, Path]] = None,
         ttl_hours: int = 24,
         offline: bool = False,
         user_agent: str = USER_AGENT,
@@ -51,8 +51,8 @@ class ApiClient:
         self,
         method: str,
         url: str,
-        params: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
+        params: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
         data: Any = None,
         json_payload: Any = None,
     ) -> str:
@@ -86,7 +86,7 @@ class ApiClient:
         except Exception:
             pass
 
-    def _get_cached(self, key: str) -> ResponseWrapper | None:
+    def _get_cached(self, key: str) -> Optional[ResponseWrapper]:
         if not self.cache_enabled:
             return None
         data = self._read_cache()
@@ -136,7 +136,7 @@ class ApiClient:
             json_obj=parsed,
         )
 
-    def _sleep(self, attempt: int, retry_after: float | None = None) -> None:
+    def _sleep(self, attempt: int, retry_after: Optional[float] = None) -> None:
         if attempt <= 0:
             return
         if retry_after is not None:
@@ -150,13 +150,21 @@ class ApiClient:
         self,
         method: str,
         url: str,
-        headers: dict[str, str] | None = None,
-        params: dict[str, Any] | None = None,
+        headers: Optional[Dict[str, str]] = None,
+        params: Optional[Dict[str, Any]] = None,
         data: Any = None,
         json_payload: Any = None,
+        disable_cache: bool = False,
     ) -> ResponseWrapper:
-        key = self._build_cache_key(method, url, params=params, headers=headers, data=data, json_payload=json_payload)
-        cached = self._get_cached(key)
+        key = self._build_cache_key(
+            method,
+            url,
+            params=params,
+            headers=headers,
+            data=data,
+            json_payload=json_payload,
+        )
+        cached = None if disable_cache else self._get_cached(key)
         if cached:
             return cached
 
@@ -201,19 +209,34 @@ class ApiClient:
                 )
 
             parsed = self._parse_response(url, response)
+            if disable_cache:
+                return parsed
             return self._cache_if_needed(key, parsed)
 
         raise ToolError(f"Request exhausted retries for {url}")
 
-    def get(self, url: str, headers: dict[str, str] | None = None, params: dict[str, Any] | None = None) -> ResponseWrapper:
-        return self._request("GET", url, headers=headers, params=params)
+    def get(
+        self,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        disable_cache: bool = False,
+    ) -> ResponseWrapper:
+        return self._request("GET", url, headers=headers, params=params, disable_cache=disable_cache)
 
     def post(
         self,
         url: str,
-        headers: dict[str, str] | None = None,
+        headers: Optional[Dict[str, str]] = None,
         data: Any = None,
         json_payload: Any = None,
+        disable_cache: bool = False,
     ) -> ResponseWrapper:
-        return self._request("POST", url, headers=headers, data=data, json_payload=json_payload)
-
+        return self._request(
+            "POST",
+            url,
+            headers=headers,
+            data=data,
+            json_payload=json_payload,
+            disable_cache=disable_cache,
+        )

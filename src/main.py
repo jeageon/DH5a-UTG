@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
 from dataclasses import asdict
+from pathlib import Path
 
 import click
 
 from .config import (
     CACHE_DIR,
+    DH5A_ACCESSION,
+    DH5A_NAME,
+    DH5A_TAXID,
     DEFAULT_FEATURES,
     DEFAULT_FLANK,
     DEFAULT_CACHE_TTL_HOURS,
@@ -21,6 +24,7 @@ from .modules.feature_scanner import FeatureScanner
 from .modules.output_generator import write_outputs
 from .modules.sequence_fetcher import SequenceFetcher
 from .utils.api_client import ApiClient
+from .utils.exceptions import UTGError
 
 
 def _parse_features(features_csv: str) -> list[str]:
@@ -29,7 +33,7 @@ def _parse_features(features_csv: str) -> list[str]:
 
 
 @click.command()
-@click.argument("uniprot_id")
+@click.argument("query")
 @click.option("--outdir", default=str(OUTPUT_DIR), type=click.Path(file_okay=False, path_type=Path), help="output directory")
 @click.option("--flank", default=DEFAULT_FLANK, type=int, help="flanking length in bp")
 @click.option(
@@ -39,16 +43,19 @@ def _parse_features(features_csv: str) -> list[str]:
     help="flank expansion mode",
 )
 @click.option(
-    "--assembly",
-    default="auto",
-    help="assembly preference (GRCh38/GRCh37/auto)",
-)
-@click.option(
     "--mask",
     type=click.Choice(["none", "soft", "hard"]),
     default="soft",
-    help="Ensembl masking mode",
+    help="Masking mode (only used by Ensembl paths)",
 )
+@click.option(
+    "--query-type",
+    type=click.Choice(["auto", "gene_name", "uniprot_id"], case_sensitive=False),
+    default="auto",
+    help="auto detects query type; gene_name is recommended for DH5a",
+)
+@click.option("--taxid", default=DH5A_TAXID, type=int, help=f"NCBI taxid filter (default: {DH5A_TAXID})")
+@click.option("--ncbi-accession", default=DH5A_ACCESSION, help=f"Preferred NCBI accession (default: {DH5A_ACCESSION})")
 @click.option(
     "--features",
     default=",".join(DEFAULT_FEATURES),
@@ -69,12 +76,14 @@ def _parse_features(features_csv: str) -> list[str]:
 @click.option("--debug", is_flag=True, default=False)
 @click.option("--write-metadata-json", is_flag=True, default=True)
 def cli(
-    uniprot_id: str,
+    query: str,
     outdir: Path,
     flank: int,
     flank_mode: str,
-    assembly: str,
     mask: str,
+    query_type: str,
+    taxid: int,
+    ncbi_accession: str,
     features: str,
     maf_threshold: float,
     gc_window: int,
@@ -92,74 +101,89 @@ def cli(
     write_metadata_json: bool,
 ):
     del debug
-    selected_features = _parse_features(features)
-    feature_options = FeatureScanOptions(
-        maf_threshold=maf_threshold,
-        gc_window=gc_window,
-        gc_step=gc_step,
-        gc_min=gc_min,
-        gc_max=gc_max,
-        homopolymer_at=homopolymer_at,
-        homopolymer_gc=homopolymer_gc,
-    )
+    try:
+        selected_features = _parse_features(features)
+        feature_options = FeatureScanOptions(
+            maf_threshold=maf_threshold,
+            gc_window=gc_window,
+            gc_step=gc_step,
+            gc_min=gc_min,
+            gc_max=gc_max,
+            homopolymer_at=homopolymer_at,
+            homopolymer_gc=homopolymer_gc,
+        )
 
-    cache_enabled = cache == "on"
-    api = ApiClient(
-        timeout=timeout,
-        retries=retries,
-        cache_enabled=cache_enabled,
-        cache_path=str(CACHE_DIR),
-        ttl_hours=cache_ttl_hours,
-        offline=offline,
-    )
+        cache_enabled = cache == "on"
+        api = ApiClient(
+            timeout=timeout,
+            retries=retries,
+            cache_enabled=cache_enabled,
+            cache_path=str(CACHE_DIR),
+            ttl_hours=cache_ttl_hours,
+            offline=offline,
+        )
 
-    resolver = CoordinateResolver(api)
-    resolver_result = resolver.resolve(
-        uniprot_id=uniprot_id,
-        flank_bp=flank,
-        flank_mode=flank_mode,
-        assembly_preference=assembly,
-    )
-    coordinates = resolver_result.coordinates
+        resolver = CoordinateResolver(api)
+        resolver_result = resolver.resolve(
+            query=query,
+            flank_bp=flank,
+            flank_mode=flank_mode,
+            taxid_filter=taxid,
+            query_type=query_type.lower(),
+            ncbi_accession=ncbi_accession,
+        )
+        coordinates = resolver_result.coordinates
 
-    fetcher = SequenceFetcher(api)
-    sequence, fetch_warnings = fetcher.fetch(coordinates=coordinates, mask=mask)
+        fetcher = SequenceFetcher(api)
+        sequence, fetch_warnings = fetcher.fetch(coordinates=coordinates, mask=mask)
 
-    scanner = FeatureScanner(api)
-    detected_features, scan_warnings = scanner.scan(
-        coordinates=coordinates,
-        full_sequence=sequence,
-        requested_features=selected_features,
-        options=feature_options,
-    )
+        scanner = FeatureScanner(api)
+        detected_features, scan_warnings = scanner.scan(
+            coordinates=coordinates,
+            full_sequence=sequence,
+            requested_features=selected_features,
+            options=feature_options,
+        )
 
-    metadata = {
-        "uniprot_id": uniprot_id,
-        "ensembl_gene_id": coordinates.ensembl_gene_id,
-        "assembly": coordinates.assembly_name,
-        "region": f"{coordinates.seq_region_name}:{coordinates.ext_start_1based}-{coordinates.ext_end_1based}:{coordinates.strand}",
-        "flank_bp": flank,
-        "flank_mode": flank_mode,
-        "mask": mask,
-        "api_cache": cache_enabled,
-        "options": asdict(feature_options),
-        "warnings": [*resolver_result.warnings, *fetch_warnings, *scan_warnings],
-    }
+        metadata = {
+            "query": query,
+            "query_type": coordinates.query_type,
+            "query_gene": coordinates.query_gene,
+            "uniprot_id": coordinates.uniprot_id,
+            "ensembl_gene_id": coordinates.ensembl_gene_id,
+            "coordinate_source": coordinates.coordinate_source,
+            "ncbi_accession": coordinates.ncbi_accession,
+            "ncbi_genome_length": coordinates.ncbi_genome_length,
+            "organism": DH5A_NAME,
+            "assembly": coordinates.assembly_name,
+            "region": f"{coordinates.seq_region_name}:{coordinates.ext_start_1based}-{coordinates.ext_end_1based}:{coordinates.strand}",
+            "flank_bp": flank,
+            "flank_mode": flank_mode,
+            "mask": mask,
+            "ncbi_accession_preference": ncbi_accession,
+            "api_cache": cache_enabled,
+            "options": asdict(feature_options),
+            "warnings": [*resolver_result.warnings, *fetch_warnings, *scan_warnings],
+        }
 
-    bundle = SequenceRecordBundle(
-        coordinates=coordinates,
-        full_sequence=sequence,
-        features=detected_features,
-        metadata=metadata,
-    )
-    gb_path, metadata_path = write_outputs(
-        bundle=bundle,
-        outdir=outdir,
-        write_metadata_json=write_metadata_json,
-    )
-    click.echo(f"GenBank: {gb_path}")
-    if metadata_path:
-        click.echo(f"Metadata: {metadata_path}")
+        bundle = SequenceRecordBundle(
+            coordinates=coordinates,
+            full_sequence=sequence,
+            features=detected_features,
+            metadata=metadata,
+        )
+        gb_path, metadata_path = write_outputs(
+            bundle=bundle,
+            outdir=outdir,
+            write_metadata_json=write_metadata_json,
+        )
+        click.echo(f"GenBank: {gb_path}")
+        if metadata_path:
+            click.echo(f"Metadata: {metadata_path}")
+    except UTGError as exc:
+        raise click.ClickException(str(exc))
+    except Exception as exc:
+        raise click.ClickException(f"Unexpected error: {exc}") from exc
 
 
 if __name__ == "__main__":

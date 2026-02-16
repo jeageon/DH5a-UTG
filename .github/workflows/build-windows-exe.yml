@@ -1,0 +1,64 @@
+name: Build and Release Windows EXE
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: "Create GitHub release with built EXE files"
+        required: false
+        default: "false"
+        type: string
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+          architecture: "x64"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Build Windows executables
+        shell: pwsh
+        run: |
+          .\packaging\windows\build-windows-exe.ps1 -BuildCLI -CreateDesktopShortcuts:$false
+
+      - name: Prepare release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          Copy-Item .\dist\DH5a-UTG-WebUI.exe .\artifacts\
+          Copy-Item .\dist\DH5a-UTG-CLI.exe .\artifacts\
+          Compress-Archive -Path .\artifacts\* -DestinationPath .\artifacts\DH5a-UTG-windows-executables.zip -Force
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-executables
+          path: artifacts
+
+      - name: Upload GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/DH5a-UTG-WebUI.exe
+            artifacts/DH5a-UTG-CLI.exe
+            artifacts/DH5a-UTG-windows-executables.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

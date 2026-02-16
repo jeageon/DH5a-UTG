@@ -23,6 +23,16 @@ python -m src.main lacZ --query-type gene_name
 python -m src.main P04637 --query-type uniprot_id
 ```
 
+## WebUI 실행
+
+```bash
+python3 -m pip install -r requirements.txt
+streamlit run src/webui.py
+```
+
+- 기본값은 DH5a(E. coli K-12 계열, taxid 511145 / CP076470) 기반입니다.
+- 입력창에 유전자명 또는 UniProt ID를 입력하면 간섭 feature 분석 결과를 즉시 확인할 수 있습니다.
+
 기본값:
 - `--flank`: 유전자 좌우 확장 bp(기본 10000)
 - `--taxid`: `511145` (E. coli DH5α)

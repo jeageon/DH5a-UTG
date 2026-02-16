@@ -3,4 +3,4 @@ click>=8.1
 pydantic>=2.6
 requests>=2.31
 intervaltree>=3.1
-
+streamlit>=1.39

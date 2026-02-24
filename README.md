@@ -12,7 +12,7 @@
 ## 설치
 
 ```bash
-릴리즈에서 zip 파일을 C:\Program Files 에 압축풀기
+release에서 zip 파일을 C:\Program Files 에 압축풀기
 
 ```
 ## WebUI 실행
